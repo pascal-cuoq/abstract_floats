@@ -59,7 +59,6 @@ module Header : sig
   val of_abstract_float : abstract_float -> t
 
   val allocate_abstract_float : t -> abstract_float
-  val write_header : abstract_float -> t -> unit
 
   val add: t -> t -> t
   val sub: t -> t -> t
@@ -101,17 +100,14 @@ end = struct
     else 2
 
   let of_abstract_float a =
-    let l = Array.length a in
-    assert (l >= 2);
-    Int64.to_int (Int64.shift_right_logical (Int64.bits_of_float a.(0)) 52)
+    assert (Array.length a >= 2);
+    let l = Int64.shift_right_logical (Int64.bits_of_float a.(0)) 52 in
+    (Int64.to_int l) land 255
 
   let allocate_abstract_float h =
     Array.make
       (size h)
       (Int64.float_of_bits (Int64.of_int (h lsl 52)))
-
-  let write_header a h =
-    a.(0) <- Int64.float_of_bits (Int64.of_int (h lsl 52))
 
 (* only to implement sub from add *)
   let neg h =
