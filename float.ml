@@ -60,6 +60,7 @@ module Header : sig
 
   val allocate_abstract_float : t -> abstract_float
 
+  val sqrt: t -> t
   val add: t -> t -> t
   val sub: t -> t -> t
   val mult: t -> t -> t
@@ -109,6 +110,9 @@ end = struct
       (size h)
       (Int64.float_of_bits (Int64.of_int (h lsl 52)))
 
+  (* sqrt(-0.) = -0., sqrt(+0.) = +0., sqrt(+inf) = +inf *)
+  let sqrt h = assert false
+
 (* only to implement sub from add *)
   let neg h =
     let neg = h land (negative_zero + negative_inf + negative_normalish) in
@@ -119,14 +123,14 @@ end = struct
     let h1negintopos = h1 lsl 1 in
     let h2negintopos = h2 lsl 1 in
     let pos_zero =
-      (* +0.0 is present if +0.0 is present on one side and any zero
-         on the other side. All computations in the positive_zero bit *)
+      (* +0.0 is present if +0.0 is present in one operand and any zero
+         in the other. All computations in the positive_zero bit *)
       let has_any_zero1 = h1 lor h1negintopos in
       let has_any_zero2 = h2 lor h2negintopos in
       ((h1 land has_any_zero2) lor (h2 land has_any_zero1)) land positive_zero
     in
     let neg_zero =
-      (* -0.0 is present if -0.0 is present on both sides *)
+      (* -0.0 is present in result if -0.0 is present in both operands *)
       h1 land h2 land negative_zero
     in
     let nan =
@@ -140,12 +144,12 @@ end = struct
     let nan = (nan lor h1 lor h2) land at_least_one_NaN in
     let nan = (- nan) land 3 in
     (* Compute both infinities in parallel.
-       An infinity can arise from that infinity on one side and
-       any finite or the same infinity on the other.*)
+       An infinity can arise from that infinity in one operand and
+       any finite value or the same infinity in the other.*)
     let transfers_inf =
       negative_zero + positive_zero + negative_normalish + positive_normalish
     in
-    (* Finites transfer all infinities, but if these are
+    (* Finite values transfer all infinities, but if finite values are
     absent, h1 can only contribute to create the infinities it has. *)
     let h1_transfer = if h1 land transfers_inf = 0 then h1 else -1 in
     let h2_transfer = if h2 land transfers_inf = 0 then h2 else -1 in
@@ -232,12 +236,12 @@ let set_neg_upper a f =
   assert(neg_infinity < f);
   assert(f < 0.0);
   a.(2) <- f
-let set_neg a fl fu =
-  assert(neg_infinity < fl);
-  assert(fl <= fu);
-  assert(fu < 0.0);
-  a.(1) <- -. fl;
-  a.(2) <- fu
+let set_neg a l u =
+  assert(neg_infinity < l);
+  assert(l <= u);
+  assert(u < 0.0);
+  a.(1) <- -. l;
+  a.(2) <- u
 let set_pos_lower a f =
   assert(0.0 < f);
   assert(f < infinity);
@@ -246,13 +250,13 @@ let set_pos_upper a f =
   assert(0.0 < f);
   assert(f < infinity);
   a.(Array.length a - 1) <- f
-let set_pos a fl fu =
-  assert(0.0 < fl);
-  assert(fl <= fu);
-  assert(fu < infinity);
-  let l = Array.length a in
-  a.(l - 2) <- -. fl;
-  a.(l - 1) <- fu
+let set_pos a l u =
+  assert(0.0 < l);
+  assert(l <= u);
+  assert(u < infinity);
+  let le = Array.length a in
+  a.(le - 2) <- -. l;
+  a.(le - 1) <- u
 
 let get_opp_neg_lower a = a.(1)
 let get_neg_upper a = a.(2)
@@ -429,6 +433,30 @@ let intersects a1 a2 = assert false
 
 (* *** Arithmetic *** *)
 
+(* negate() is a bitstring operation, even on NaNs. (IEEE 754-2008 6.3)
+   and C99 says unary minus uses negate. Indirectly, anyway.
+   @UINT_MIN https://twitter.com/UINT_MIN/status/702199094169604096 *)
+let neg a =
+  assert false
+
+
+let abstract_sqrt a =
+  if is_singleton a
+  then begin
+    let a = sqrt (a.(0)) in
+    if a <> a
+    then abstract_all_NaNs
+    else inject_float a
+  end
+  else
+    let h = Header.of_abstract_float a in
+    let new_h = Header.sqrt h in
+    if Header.(test h positive_normalish)
+    then
+      assert false
+    else
+      Header.allocate_abstract_float new_h
+
 (* [expand a] returns the non-singleton representation corresponding
    to a singleton [a].  Never let expanded forms escape outside a
    short computations!  The representation for a same set of floats
@@ -563,3 +591,23 @@ let div_expanded a1 a2 =
 (** [div a1 a2] returns the set of values that can be taken by dividing
     a value from [a1] by a value from [a2]. *)
 let div a1 a2 = binop ( /. ) div_expanded
+
+(* *** Backwards functions *** *)
+
+(* The set of values x such that x + a == b *)
+let reverse_add a b =
+  assert false
+
+(* The set of values x such that x * a == b *)
+let reverse_mult a b =
+  assert false
+
+(* The set of values x such that x / a == b *)
+let reverse_div1 a b =
+  assert false
+
+(* The set of values x such that a / x == b *)
+let reverse_div2 a b =
+  assert false
+
+
