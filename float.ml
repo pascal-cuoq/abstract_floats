@@ -624,7 +624,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       ( match is_nan f1, is_nan f2, f1, f2 with
       | true, true, _, _ ->
         (* the representation of the two NaNs is different because
-           the case [equal a1 a2] has been handled. Set [all_NaNs]. *)
+           the case [equal a1 a2] has been handled. *)
         abstract_all_NaNs
       | true, false, theNaN, nonNaN | false, true, nonNaN, theNaN ->
         (* one of the FP numbers is NaN *)
