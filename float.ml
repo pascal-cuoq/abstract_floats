@@ -105,7 +105,7 @@ module Header : sig
   val bottom : t
   val is_bottom : t -> bool
 
-  val pp: Format.formatter -> t -> unit
+  val pretty: Format.formatter -> t -> unit
   val combine : t -> t -> t
   val test : t -> flag -> bool
   val set_flag : t -> flag -> t
@@ -164,7 +164,7 @@ end = struct
   let get_NaN_part h = h land (at_least_one_NaN + all_NaNs)
   let exactly_one_NaN h = (get_NaN_part h) = at_least_one_NaN
 
-  let pp fmt h =
+  let pretty fmt h =
     let bottom = is_bottom h in
     if bottom then
       Format.fprintf fmt "Bottom"
@@ -470,12 +470,12 @@ let set_header_from_singleton f h =
       Header.(set_flag h negative_zero)
     else
       Header.(set_flag h positive_zero)
-  | FP_subnormal -> h
+  | FP_subnormal
   | FP_normal ->
-    if is_neg f then
+    if f < 0.0 then
       Header.(set_flag h negative_normalish)
     else
-      Header.(set_flag h positive_zero)
+      Header.(set_flag h positive_normalish)
   | FP_infinite ->
     if is_neg f then
       Header.(set_flag h positive_inf)
@@ -525,7 +525,7 @@ let normalize_for_mult = normalize_zero_and_inf Header.negative_zero
     that capture negative values and positive values.
     Normal bound, not inverted.
     CR: is the result abstract_float always of size 5?
-    PC: no, [ Header.allocate_abstract_float header] allocates it of the
+    PC: no, [Header.allocate_abstract_float header] allocates it of the
     right size, and only the bounds that exist are written to it. *)
 let inject header neg_l neg_u pos_l pos_u =
   let no_neg = neg_l > neg_u in
@@ -567,9 +567,9 @@ let inject header neg_l neg_u pos_l pos_u =
           r
 
 (* pretty-printing *)
-let pp_abstract_float fmt a =
+let pretty fmt a =
   let h = Header.of_abstract_float a in
-  Header.pp fmt h;
+  Header.pretty fmt h;
   if Header.exactly_one_NaN h
   then assert false;
   let l = Array.length a in
@@ -617,17 +617,17 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
   if equal a1 a2
   then a1
   else begin
+    match is_singleton a1, is_singleton a2, a1, a2 with
+    | true, true, _, _ ->
     (* both [a1] and [a2] are singletons *)
-    if is_singleton a1 && is_singleton a2 then
       let f1, f2 = a1.(0), a2.(0) in
-      let n1, n2 = is_nan f1, is_nan f2 in
-      match n1, n2, f1, f2 with
+      ( match is_nan f1, is_nan f2, f1, f2 with
       | true, true, _, _ ->
         (* the representation of the two NaNs is different because
            the case [equal a1 a2] has been handled. Set [all_NaNs]. *)
-          abstract_all_NaNs
+        abstract_all_NaNs
       | true, false, theNaN, nonNaN | false, true, nonNaN, theNaN ->
-      (* one of the FP numbers is NaN *)
+        (* one of the FP numbers is NaN *)
         let h = Header.(of_flag at_least_one_NaN) in
         let h = set_header_from_singleton nonNaN h in
         let a = Header.allocate_abstract_float_with_nan h theNaN in
@@ -638,7 +638,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
         end;
         a
       | false, false, _, _ ->
-      (* none of the FP numbers are NaN *)
+        (* none of the FP numbers are NaN *)
         (* PC: I think this part can be made much more concise but I didn't
            touch it. *)
         let h = set_header_from_singleton f1 Header.bottom in
@@ -671,13 +671,11 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
             | (false, true) when Header.size h = 5 ->
               set_pos a f1 f1; set_neg a f2 f2; a
             | _, _ -> raise Fetal_error_when_allocating_abstract_float
-        end
-    else
+        end)
+    | true, false, single, non_single | false, true, non_single, single ->
       (* one of [a1] and [a2] is singleton *)
-    if is_singleton a1 && not (is_singleton a2) ||
-       is_singleton a2 && not (is_singleton a1) then
       assert false
-    else
+    | false, false, _, _ ->
       (* neither [a1] nor [a2] is singleton *)
       assert false
   end
@@ -727,7 +725,7 @@ let expand a =
   else
     let repr = Int64.bits_of_float a in
     if repr = 0L then zero
-    else if repr = 0x8000000000000000L then neg_zero
+    else if repr = sign_bit then neg_zero
     else
       let flag =
         if a < 0.0 then Header.negative_normalish else Header.positive_normalish
