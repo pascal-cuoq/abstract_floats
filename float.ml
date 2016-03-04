@@ -373,13 +373,10 @@ let set_pos a l u =
   a.(le - 1) <- u
 
 let set_same_bound a f =
-  match classify_float f with
-  | FP_normal | FP_subnormal ->
-    let le = Array.length a in
-    assert (le = 3);
-    a.(1) <- -. f;
-    a.(2) <- f
-  | _ -> assert false
+  assert (let c = classify_float f in c = FP_normal || c = FP_subnormal);
+  assert (Array.length a = 3);
+  a.(1) <- -. f;
+  a.(2) <- f
 
 let get_opp_neg_lower a = a.(1)
 let get_neg_upper a = a.(2)
