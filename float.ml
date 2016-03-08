@@ -5,7 +5,7 @@ type abstract_float = float array
 
   array [t] with length 1:
     a single floating-point number
-    (can be nan of +inf or -inf, or a finite value)
+    (can be NaN, +inf, -inf, or a finite value)
 
   array [t] with length >=2:
     header + bounds. the first field is header. the rest of fields are bounds.
@@ -17,7 +17,7 @@ type abstract_float = float array
       field a.(1) containing garbage data we don't care.
 
     length of 5:
-      the fp number could be both pos normalish and neg
+      the FP number could be both pos normalish and neg
       normalish. the last four fields indicating two pairs of bounds
       (first neg bounds, then pos bounds).
 
@@ -27,10 +27,10 @@ type abstract_float = float array
 
   the header (found in t.(0)) can indicate:
 
-    at least one of the nan values present
-    all nan values present
-    fp number can be in negative normalish range
-    fp number can be in positive normalish range
+    at least one of the NaN values present
+    all NaN values present
+    FP number can be in negative normalish range
+    FP number can be in positive normalish range
     -inf present
     +inf present
     -0.0 present
@@ -40,7 +40,7 @@ type abstract_float = float array
 
   - normalish means the intervals of normal (or subnormal) values
   - finite means the normalish and zero components of the representation
-  - nonzero means the normalish and infinite components, but usually not nan
+  - nonzero means the normalish and infinite components, but usually not NaN
 *)
 
 let is_zero f = classify_float f = FP_zero
@@ -93,9 +93,9 @@ exception Fetal_error_when_allocating_abstract_float
     +---+---+---+---+---+---+---+---+
                       |   |   |   |
                       |   |   |   |
-                      |   |   |   |------- at_least_one_nan
+                      |   |   |   |------- at_least_one_NaN
                       |   |   |
-                      |   |   |----------- all_nan (both quiet and signalling)
+                      |   |   |----------- all_NaN (both quiet and signalling)
                       |   |
                       |   |--------------- negative_normalish
                       |
@@ -103,10 +103,10 @@ exception Fetal_error_when_allocating_abstract_float
 
 
   Notes:
-    1. three possibilities of nan are encoded:
-        1) no nan is present
-        2) at least one nan is present
-        3) both nans are present
+    1. three possibilities of NaN are encoded:
+        1) no NaN is present
+        2) at least one NaN is present
+        3) both NaNs are present
 
   *********************************************************************
 
@@ -119,7 +119,7 @@ exception Fetal_error_when_allocating_abstract_float
        |
        | Unused (3 bits)
        |  /         \
-     | s | x | x | x | h | h | h | … | h | h | p | p | p | … | p |
+     | s | 0 | 0 | 0 | h | h | h | … | h | h | p | p | p | … | p |
        |              \                     / \                 /
        |               \                   /   \   (52 bits)   /
        |                 Header.t (8 bits)      \             /
@@ -222,8 +222,8 @@ module Header : sig
   (** [allocate_abstract_float h] is an abstract float of size indicated by
       [h], and fields correctly set according to [h] *)
 
-  val allocate_abstract_float_with_nan : t -> float -> abstract_float
-  (** [allocate_abstract_float_with_nan h f] is an abstract float with header
+  val allocate_abstract_float_with_NaN : t -> float -> abstract_float
+  (** [allocate_abstract_float_with_NaN h f] is an abstract float with header
     indicating at least one NaN. [f], which is expected to be a NaN value,
     is used to set the payload of the result abstract float *)
 
@@ -331,7 +331,7 @@ end = struct
       (size h)
       (Int64.float_of_bits (Int64.of_int (h lsl 52)))
 
-  let allocate_abstract_float_with_nan h f =
+  let allocate_abstract_float_with_NaN h f =
     match classify_float f with
     | FP_nan -> begin
         let nan_payload =
@@ -481,7 +481,7 @@ let copy_bounds a1 a2 =
   match Array.length a1, Array.length a2 with
   | 2, _ -> ()
   | 3, ((3 | 5) as l) -> begin
-    if Header.(test (Header.of_abstract_float a1) positive_normalish) then
+    if Header.(test (of_abstract_float a1) positive_normalish) then
       (a2.(l - 2) <- a1.(1); a2.(l - 1) <- a1.(2))
     else
       (a2.(1) <- a1.(1); a2.(2) <- a1.(2))
@@ -518,10 +518,10 @@ let subst_header (a: abstract_float) (h: Header.t) =
 
 (** [subst_header_with_nan a f h] is a freshly allocated abstract float that
     is the same as [a], but with a new header [h] and payload from [f] *)
-let subst_header_with_nan (a: abstract_float) (fnan: float) (h: Header.t) =
+let subst_header_with_NaN (a: abstract_float) (fnan: float) (h: Header.t) =
   assert (Array.length a >= 2);
   let a = Array.copy a in
-  a.(0) <- (Header.allocate_abstract_float_with_nan h fnan).(0);
+  a.(0) <- (Header.allocate_abstract_float_with_NaN h fnan).(0);
   a
 
 (** [set_neg_lower a f] sets lower bound of negative normalish to [-. f] *)
@@ -673,17 +673,6 @@ let inject_interval f1 f2 = assert false (* TODO *)
 
 let is_singleton f = Array.length f = 1
 
-let insert_float f a = ()
-
-let insert_float f a =
-  assert (let c = classify_float f in c = FP_normal || c = FP_subnormal);
-  if Array.length a = 3 then
-    set_same_bound a f else
-  if Array.length a = 5 then
-    assert false
-  else
-    assert false
-
 let zero = inject_float 0.0
 let neg_zero = inject_float (-0.0)
 let abstract_infinity = inject_float infinity
@@ -724,11 +713,12 @@ let merge_float a f =
    *)
   | FP_nan -> begin
       if Header.(test h at_least_one_NaN) then begin
-        if reconstruct_nan a = Int64.bits_of_float f then a else
+        if reconstruct_nan a =
+           Int64.(logand (bits_of_float f) payload_mask) then a else
           subst_header a (Header.set_all_NaNs h)
       end else
       if Header.(test h all_NaNs) then a else
-        subst_header_with_nan a f (Header.(set_flag h at_least_one_NaN))
+        subst_header_with_NaN a f (Header.(set_flag h at_least_one_NaN))
     end
   (* singleton is normalish. A freshly abstract float will be allocated
      based on [a]. New header and original potential payload are set. *)
@@ -891,7 +881,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
         (* one of the FP numbers is NaN *)
         let h = Header.(of_flag at_least_one_NaN) in
         let h = set_header_from_float nonNaN h in
-        let a = Header.allocate_abstract_float_with_nan h theNaN in
+        let a = Header.allocate_abstract_float_with_NaN h theNaN in
         if Header.size h <> 2
         then begin
           assert (Header.size h = 3);
@@ -919,7 +909,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
             | false, _, false, _, 3 -> set_pos a f1 f2; a
             | true, f1, false, f2, 5 | false, f2, false, f1, 5 ->
               (set_neg a f1 f1; set_pos a f2 f2; a)
-            | _, _, _, _, _ -> raise Fetal_error_when_allocating_abstract_float
+            | _, _, _, _, _ -> assert false
             end
           | _, _, _ -> assert false
         end)
