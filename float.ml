@@ -1,54 +1,83 @@
 type abstract_float = float array
+
 (*
   type [abstract_float] is represented using an array of (unboxed) floats.
 
-  Array [t] with length 1:
+  array [t] with length 1:
     a single floating-point number
-    (can be NaN of +inf or -inf, or a finite value)
+    (can be nan of +inf or -inf, or a finite value)
 
-  Array [t] with length >=2:
-    header + bounds. The first field is header. The rest of fields are bounds.
-    The length of t can only be 2, 3 or 5.
+  array [t] with length >=2:
+    header + bounds. the first field is header. the rest of fields are bounds.
+    the length of t can only be 2, 3 or 5.
 
-    Length of 2:
-      Only intended to distinguish a header from a single
-      floating-point number. This means such array [a] has the
+    length of 2:
+      only intended to distinguish a header from a single
+      floating-point number. this means such array [a] has the
       field a.(1) containing garbage data we don't care.
 
-    Length of 5:
-      the FP number could be both pos normalish and neg
-      normalish. The last four fields indicating two pairs of bounds
+    length of 5:
+      the fp number could be both pos normalish and neg
+      normalish. the last four fields indicating two pairs of bounds
       (first neg bounds, then pos bounds).
 
-    Length of 3:
-      the FP number could be either pos normalish or neg normalish,
+    length of 3:
+      the fp number could be either pos normalish or neg normalish,
        rest two fields indicating one pair of bounds.
 
-  The header (found in t.(0)) can indicate:
+  the header (found in t.(0)) can indicate:
 
-    at least one of the NaN values present
-    all NaN values present
-    FP number can be in negative normalish range
-    FP number can be in positive normalish range
+    at least one of the nan values present
+    all nan values present
+    fp number can be in negative normalish range
+    fp number can be in positive normalish range
     -inf present
     +inf present
     -0.0 present
     +0.0 present
 
-  Vocabulary:
+  vocabulary:
 
   - normalish means the intervals of normal (or subnormal) values
   - finite means the normalish and zero components of the representation
-  - nonzero means the normalish and infinite components, but usually not NaN
+  - nonzero means the normalish and infinite components, but usually not nan
 *)
+
+let is_zero f = classify_float f = FP_zero
+
+let sign_bit = 0x8000_0000_0000_0000L
+
+let payload_mask = 0x800F_FFFF_FFFF_FFFFL
+
+let header_mask  = 0x0FF0_0000_0000_0000L
+
+let is_pos_zero f = Int64.bits_of_float f = 0L
+
+let is_neg_zero f = Int64.bits_of_float f = sign_bit
+
+let is_pos f = Int64.(logand (bits_of_float f) sign_bit) = 0L
+
+let is_neg f = Int64.(logand (bits_of_float f) sign_bit) <> 0L
+
+let is_nan f = classify_float f = FP_nan
+
 
 exception Invalid_abstract_float_length of int
 exception Fetal_error_when_allocating_abstract_float
 
-(*              Header.t description
+(*
 
+  *********************************************************************
+  *                                                                   *
+  *                         Internal layout                           *
+  *                                                                   *
+  *********************************************************************
 
-              From left to right: bits 0 - 7
+                          *******************
+                          *     Header.t    *
+                          *******************
+
+                     From left to right: bits 0 - 7
 
       |----------------------------------- positive_zero
       |
@@ -64,80 +93,165 @@ exception Fetal_error_when_allocating_abstract_float
     +---+---+---+---+---+---+---+---+
                       |   |   |   |
                       |   |   |   |
-                      |   |   |   |------- at_least_one_NaN
+                      |   |   |   |------- at_least_one_nan
                       |   |   |
-                      |   |   |----------- all_NaN (both quiet and signalling)
+                      |   |   |----------- all_nan (both quiet and signalling)
                       |   |
                       |   |--------------- negative_normalish
                       |
                       |------------------- positive_normalish
 
-    1. Three possibilities of NaN are encoded:
-        1) No NaN is present
-        2) At least one NaN is present
-        3) Both NaNs are present
+
+  Notes:
+    1. three possibilities of nan are encoded:
+        1) no nan is present
+        2) at least one nan is present
+        3) both nans are present
+
+  *********************************************************************
+
+                         *************************
+                         *   abstract_float.(0)  *
+                         *************************
 
 
+     NaN sign bit (1 bit)
+       |
+       | Unused (3 bits)
+       |  /         \
+     | s | x | x | x | h | h | h | … | h | h | p | p | p | … | p |
+       |              \                     / \                 /
+       |               \                   /   \   (52 bits)   /
+       |                 Header.t (8 bits)      \             /
+       |                                         \           /
+       +-----------------------------------------  NaN payload
+                                                   (optional)
 
-abstract_float.(0)
-
- | s | 0 | 0 | 0 | h | h | h | … | h | h | h | p | p | p | … | p |
-   |              \    Header.t (8 bits)     / \     (52 bits)    /
-   |                                            \                /
-   +---------------------------------------------   NaN payload
-                                                     (optional)
+  Notes:
+   1. the NaN payload is a NaN's significand and sign bit. This is
+      required only when [at_least_one_NaN] flag is set in [Header.t]
 
 *)
 
 module Header : sig
   type t
+  (** abstract type for header *)
+
   type flag
+  (** abstract flag indicating property of abstract float *)
 
   val at_least_one_NaN : flag
+  (** [at_least_one_NaN] is flag indicating at least one of NaN values
+      is present, either quiet NaN, or signalling NaN.
+      When this flag is on, payload should be set *)
+
   val all_NaNs : flag
+  (** [at_least_one_NaN] is flag indicating at least one of NaN values
+      is present, either quiet NaN, or signalling NaN *)
+
   val negative_normalish : flag
+  (** [negative_normalish] is flag indicating floating-number could be in
+      negative normalish range *)
+
   val positive_normalish : flag
+  (** [positive_normalish] is flag indicating floating-number could be in
+      positive normalish range *)
+
   val negative_inf : flag
+  (** [negative_inf] is flag indicating floating-number could be
+      negative infinity *)
+
   val positive_inf : flag
+  (** [positive_inf] is flag indicating floating-number could be
+      positive infinity *)
+
   val negative_zero : flag
+  (** [negative_zero] is flag indicating floating-number could be in
+      negative zero: -0.0 *)
+
   val positive_zero : flag
+  (** [positive_zero] is flag indicating floating-number could be in
+      positive zero: +0.0 *)
 
   val bottom : t
+  (** [bottom] is header with no flag on *)
+
   val is_bottom : t -> bool
+  (** [is_bottom t] indicates whether [t] is bottom *)
 
   val pretty: Format.formatter -> t -> unit
-  val combine : t -> t -> t
-  val test : t -> flag -> bool
-  val set_flag : t -> flag -> t
-  val of_flag : flag -> t
-  val set_all_NaNs : t -> t
-  val exactly_one_NaN : t -> bool
-  val is_exactly : t-> flag -> bool
+  (** [pretty fmt t] pretty-prints [t] on [fmt] *)
 
-  (** the size of the array corresponding to the given header.
-      Note that the header alone is not enough to decide that the
+  val combine : t -> t -> t
+  (** [combine t1 t2] is the join of [t1] and [t2] *)
+
+  val test : t -> flag -> bool
+  (** [test t f] indicates whether [f] is set in [t] *)
+
+  val set_flag : t -> flag -> t
+  (** [set t f] is [t] with flag [f] set *)
+
+  val flag_of_float : float -> flag
+  (** [flag_of_float f] is flag that could be set by [f].
+      [flag_of_float nan] is [at_least_one_NaN] *)
+
+  val of_flag : flag -> t
+  (** [of_flag f] is a header with flag [t] set *)
+
+  val set_all_NaNs : t -> t
+  (** [set_all_NaNs h] is header [h] with [all_NaNs] flag set *)
+
+  val exactly_one_NaN : t -> bool
+  (** [exactly_one_NaN t f] indicates whether [f] contains at least one NaN *)
+
+  val is_exactly : t-> flag -> bool
+  (** [is_exactly h f] indicates if [t] has only [f] on *)
+
+  val size : t -> int
+  (** [size h] is the length of abstract float corresponding to the given
+      header. Note that the header alone is not enough to decide that the
       representation should be a single float. Hence this function always
       returns at least 2. *)
-  val size : t -> int
 
-  (** [of_abstract_float a] is the header of the abstract float [a].
-      Note: the abstract float [a] has to have size >= 2. In other words,
-      [a] cannot be a singleton floating point number *)
   val of_abstract_float : abstract_float -> t
+  (** [of_abstract_float a] is the header of the abstract float [a].
+       Note: the abstract float [a] has to have size >= 2. In other words,
+      [a] cannot be a singleton floating point number *)
 
   val allocate_abstract_float : t -> abstract_float
+  (** [allocate_abstract_float h] is an abstract float of size indicated by
+      [h], and fields correctly set according to [h] *)
 
   val allocate_abstract_float_with_nan : t -> float -> abstract_float
+  (** [allocate_abstract_float_with_nan h f] is an abstract float with header
+    indicating at least one NaN. [f], which is expected to be a NaN value,
+    is used to set the payload of the result abstract float *)
 
   val join : t -> t -> abstract_float
-  (** [join h1 h2] allocates an abstract float with header properly set by
+  (** [join h1 h2] is an abstract float with header properly set by
       [Header.combine] *)
 
   val sqrt: t -> t
+  (** [sqrt h] is the header of abstract float with header [h] after square
+      root operation *)
+
   val add: t -> t -> t
+  (** [add h1 h2] is the header of the result abstract float of addition
+      arithmetic operation of two abstract floats of headers [h1] and [h2] *)
+
   val sub: t -> t -> t
+  (** [sub h1 h2] is the header of the result abstract float of subtraction
+        arithmetic operation of two abstract floats of headers [h1] and [h2] *)
+
   val mult: t -> t -> t
+  (** [mult h1 h2] is the header of the result abstract float of multiplication
+        arithmetic operation of two abstract floats of headers [h1] and [h2] *)
+
   val div: t -> t -> t
+  (** [div h1 h2] is the header of the result abstract float of division
+        arithmetic operation of two abstract floats of headers [h1] and [h2] *)
+
+
 end = struct
   type t = int
 
@@ -160,6 +274,16 @@ end = struct
   let test_both h1 h2 flag = h1 land h2 land flag <> 0
   let set_flag = combine
   let of_flag f = f
+
+  let flag_of_float f =
+    match classify_float f with
+    | FP_zero -> if is_pos_zero f then positive_zero else negative_zero
+    | FP_normal | FP_subnormal ->
+      if is_pos f then positive_normalish else negative_normalish
+    | FP_infinite ->
+      if is_pos f then positive_inf else negative_inf
+    | _ -> at_least_one_NaN
+
   let set_all_NaNs h = h lor (at_least_one_NaN + all_NaNs)
   let get_NaN_part h = h land (at_least_one_NaN + all_NaNs)
   let exactly_one_NaN h = (get_NaN_part h) = at_least_one_NaN
@@ -172,7 +296,7 @@ end = struct
       let pp_tuple_list fmt l =
         let ml = List.fold_left
             (fun m t -> max m (String.length (fst t))) 0 l in
-        let pad s = String.make (ml - String.length s) ' ' in
+        let pad s = String.make (ml + 1 - String.length s) ' ' in
         let rec loop fmt = function
           | [] -> ()
           | (s, b) :: t ->
@@ -332,7 +456,6 @@ end = struct
   let div h1 h2 = mult h1 (inv h2)
 end
 
-
 (*
 If negative_normalish, the negative bounds are always at t.(1) and t.(2)
 
@@ -342,28 +465,98 @@ let l = Array.length t in t.(l-2) and t.(l-1)
 Each pair of bounds of a same sign is represented as -lower_bound, upper_bound.
 *)
 
+(** [copy_payload a1 a2] will copy potential payload of [a1] to [a2] *)
+let copy_payload a1 a2 =
+  assert (Array.length a1 >= 2);
+  assert (Array.length a2 >= 2);
+  let potential_payload = Int64.(logand (bits_of_float a1.(0)) payload_mask) in
+  a2.(0) <- Int64.(float_of_bits
+                     (logor (bits_of_float a2.(0)) potential_payload))
+
+(** [copy_bounds a1 a2] will copy bounds of [a1] to the freshly
+    allocated [a2] *)
+let copy_bounds a1 a2 =
+  assert (Array.length a1 >= 2);
+  assert (Array.length a2 >= 2);
+  match Array.length a1, Array.length a2 with
+  | 2, _ -> ()
+  | 3, ((3 | 5) as l) -> begin
+    if Header.(test (Header.of_abstract_float a1) positive_normalish) then
+      (a2.(l - 2) <- a1.(1); a2.(l - 1) <- a1.(2))
+    else
+      (a2.(1) <- a1.(1); a2.(2) <- a1.(2))
+    end
+  | 5, 5 ->
+    for i = 1 to 4 do
+      a2.(i) <- a1.(i)
+    done
+  | _ -> assert false
+
+(** [erase_payload a] will erase potential payload in [a] *)
+let erase_payload a =
+  assert (Array.length a >= 2);
+  a.(0) <- Int64.(float_of_bits (logand (bits_of_float a.(0)) header_mask))
+
+(** [subst_header a h] is a freshly allocated abstract float that
+    is the same as [a], but with a new header [h] set. Potential payload
+    is preserved *)
+let subst_header (a: abstract_float) (h: Header.t) =
+  assert (Array.length a >= 2);
+  let a = Array.copy a in
+  let potential_payload = Int64.(logand (bits_of_float a.(0)) payload_mask) in
+  (if Header.(test h all_NaNs) then
+     (** if all_NaN flag is on, potential payload is erased *)
+     a.(0) <- (Header.allocate_abstract_float h).(0)
+   else begin
+     let cell =
+        Int64.(logor
+                 (bits_of_float (Header.allocate_abstract_float h).(0))
+                 potential_payload) in
+     a.(0) <- Int64.float_of_bits cell
+   end);
+  a
+
+(** [subst_header_with_nan a f h] is a freshly allocated abstract float that
+    is the same as [a], but with a new header [h] and payload from [f] *)
+let subst_header_with_nan (a: abstract_float) (fnan: float) (h: Header.t) =
+  assert (Array.length a >= 2);
+  let a = Array.copy a in
+  a.(0) <- (Header.allocate_abstract_float_with_nan h fnan).(0);
+  a
+
+(** [set_neg_lower a f] sets lower bound of negative normalish to [-. f] *)
 let set_neg_lower a f =
   assert(neg_infinity < f);
   assert(f < 0.0);
   a.(1) <- -. f
+
+(** [set_neg_upper a f] sets upper bound of negative normalish to [f] *)
 let set_neg_upper a f =
   assert(neg_infinity < f);
   assert(f < 0.0);
   a.(2) <- f
+
+(** [set_neg a fl fu] sets bounds of negative normalish to [fl] and [fu] *)
 let set_neg a l u =
   assert(neg_infinity < l);
   assert(l <= u);
   assert(u < 0.0);
   a.(1) <- -. l;
   a.(2) <- u
+
+(** [set_neg_lower a f] sets lower bound of positive normalish to [-. f] *)
 let set_pos_lower a f =
   assert(0.0 < f);
   assert(f < infinity);
   a.(Array.length a - 2) <- -. f
+
+(** [set_pos_upper a f] sets upper bound of positive normalish to [f] *)
 let set_pos_upper a f =
   assert(0.0 < f);
   assert(f < infinity);
   a.(Array.length a - 1) <- f
+
+(** [set_pos a fl fu] sets bound of positive normalish to [fl] and [fu] *)
 let set_pos a l u =
   assert(0.0 < l);
   assert(l <= u);
@@ -372,16 +565,17 @@ let set_pos a l u =
   a.(le - 2) <- -. l;
   a.(le - 1) <- u
 
-let set_same_bound a f =
-  assert (let c = classify_float f in c = FP_normal || c = FP_subnormal);
-  assert (Array.length a = 3);
-  a.(1) <- -. f;
-  a.(2) <- f
+(* [get_opp_neg_lower a] is the lower neg bonud of [a], in negative *)
+let get_opp_neg_lower a : float = a.(1)
 
-let get_opp_neg_lower a = a.(1)
-let get_neg_upper a = a.(2)
-let get_opp_pos_lower a = a.(Array.length a - 2)
-let get_pos_upper a = a.(Array.length a - 1)
+(* [get_neg_upper a] is the upper neg bonud of [a] *)
+let get_neg_upper a : float = a.(2)
+
+(* [get_opp_pos_lower a] is the upper neg bonud of [a], in negative *)
+let get_opp_pos_lower a : float = a.(Array.length a - 2)
+
+(* [get_pos_upper a] is the upper pos bonud of [a] *)
+let get_pos_upper a : float = a.(Array.length a - 1)
 
 (* [get_finite_upper a] returns the highest finite value contained in [a],
    or [neg_infinity] if [a] contains no finite values *)
@@ -411,8 +605,51 @@ let get_opp_finite_lower a =
   then get_opp_pos_lower a
   else neg_infinity
 
+(* [set_same_buond a f] sets pos or neg bound of [a] to [f].
+   [a] is expected to have size 3 (one header and one pair of bound *)
+let set_same_bound a f : unit =
+  assert (let c = classify_float f in c = FP_normal || c = FP_subnormal);
+  assert (Array.length a = 3);
+  a.(1) <- -. f;
+  a.(2) <- f
+
+(* [insert_pos_in_bounds a f] inserts a positive
+   float [f] in positive bounds in [a] *)
+let insert_pos_in_bounds a f : unit =
+  assert (let c = classify_float f in c = FP_normal || c = FP_subnormal);
+  assert (is_pos f);
+  assert (Array.length a >= 3);
+  set_pos_lower a (min (-.(get_opp_pos_lower a)) f);
+  set_pos_upper a (max (get_pos_upper a) f)
+
+(* [insert_neg_in_bounds a f] inserts a negative
+   float [f] in negative bounds in [a] *)
+let insert_neg_in_bounds a f : unit =
+  assert (let c = classify_float f in c = FP_normal || c = FP_subnormal);
+  assert (is_neg f);
+  assert (Array.length a >= 3);
+  print_endline "good!";
+  set_neg_lower a (min (-.(get_opp_neg_lower a)) f);
+  set_neg_upper a (max (get_neg_upper a) f)
+
+(* [insert_in_bounds] inserts a float in  *)
+let insert_float_in_bounds a f : unit =
+  assert (let c = classify_float f in c = FP_normal || c = FP_subnormal);
+  assert (Array.length a >= 3);
+  if is_neg f then
+    insert_neg_in_bounds a f
+  else
+    insert_pos_in_bounds a f
+
+(* [insert_all_bounds a1 a2] inserts all bounds in [a1] to [a2] *)
+let insert_all_bounds a1 a2 : unit =
+  assert (Array.length a1 >= 3);
+  for i = 1 to (Array.length a1 - 1) do
+    insert_float_in_bounds a2 (if i mod 2 = 1 then (-.a1.(i)) else a1.(i))
+  done
+
 (*
-Examples for testing: [1.0 … 2.0], [-10.0 … -9.0]
+  Examples for testing: [1.0 … 2.0], [-10.0 … -9.0]
 *)
 
 let onetwo =
@@ -429,55 +666,80 @@ let minus_nineten =
   set_neg_upper r (-9.0);
   r
 
+(* RH: want better naming... *)
 let inject_float f = Array.make 1 f
 
 let inject_interval f1 f2 = assert false (* TODO *)
 
 let is_singleton f = Array.length f = 1
 
+let insert_float f a = ()
+
+let insert_float f a =
+  assert (let c = classify_float f in c = FP_normal || c = FP_subnormal);
+  if Array.length a = 3 then
+    set_same_bound a f else
+  if Array.length a = 5 then
+    assert false
+  else
+    assert false
+
 let zero = inject_float 0.0
 let neg_zero = inject_float (-0.0)
 let abstract_infinity = inject_float infinity
 let abstract_neg_infinity = inject_float neg_infinity
-let abstract_all_NaNs =
-  let header = Header.(set_all_NaNs bottom) in
-  Header.allocate_abstract_float header
+let abstract_all_NaNs = Header.(allocate_abstract_float (set_all_NaNs bottom))
 
-let is_zero f =
-  match classify_float f with
-  | FP_zero -> true | _ -> false
+(** [reconstruct_nan a] is the NaN reconstructred from payload of [a]
+    if [a] has header with [at_least_one_NaN] on *)
+let reconstruct_nan a =
+  (assert (Array.length a >= 2));
+  (assert (Header.(test (of_abstract_float a) at_least_one_NaN)));
+  Int64.(logand 0x800FFFFFFFFFFFFFL (bits_of_float a.(0)))
 
-let sign_bit = 0x8000000000000000L
-
-let is_pos_zero f = Int64.bits_of_float f = 0L
-
-let is_neg_zero f = Int64.bits_of_float f = sign_bit
-
-let is_neg f = Int64.(logand (bits_of_float f) sign_bit) != 0L
-
-let is_nan f = match classify_float f with
-  | FP_nan -> true | _ -> false
-
-let set_header_from_singleton f h =
+let set_header_from_float f h =
   match classify_float f with
   | FP_nan -> invalid_arg "cannot handle NaN values: payload of NaN cannot be
                 properly set using Header.set_flag"
-  | FP_zero ->
-    if is_neg f then
-      Header.(set_flag h negative_zero)
-    else
-      Header.(set_flag h positive_zero)
-  | FP_subnormal
-  | FP_normal ->
-    if f < 0.0 then
-      Header.(set_flag h negative_normalish)
-    else
-      Header.(set_flag h positive_normalish)
-  | FP_infinite ->
-    if is_neg f then
-      Header.(set_flag h positive_inf)
-    else
-      Header.(set_flag h negative_inf)
+  | _ -> Header.(set_flag h (flag_of_float f))
+
+(** [merge_float a f] is a freshly allocated abstract float, which is
+    of the result of the merge of [f] and [a] *)
+let merge_float a f =
+  assert (Array.length a >= 2);
+  let h = Header.of_abstract_float a in
+  match classify_float f with
+  (* singleton is zero (pos and neg) or infinity (pos and neg) *)
+  | (FP_zero | FP_infinite) ->
+    let h = Header.(set_flag h (flag_of_float f)) in
+    subst_header a h
+  (* singelton is NaN. Potential NaN value is reconstructed from
+     abstract float to determine if singleton is another kind of
+     NaN. If yes, [all_NaNs] flag is set in abstract float's header.
+     Cases:
+       Header with at_least_one_NaN when payload same -> do nothing
+       Header with at_least_one_NaN when payload diff -> set all_NaNs flag
+       Header with all_NaNs -> do nothing
+       Others -> set payload, set at_least_one_NaN flag
+   *)
+  | FP_nan -> begin
+      if Header.(test h at_least_one_NaN) then begin
+        if reconstruct_nan a = Int64.bits_of_float f then a else
+          subst_header a (Header.set_all_NaNs h)
+      end else
+      if Header.(test h all_NaNs) then a else
+        subst_header_with_nan a f (Header.(set_flag h at_least_one_NaN))
+    end
+  (* singleton is normalish. A freshly abstract float will be allocated
+     based on [a]. New header and original potential payload are set. *)
+  | _ -> begin
+      let h = Header.(set_flag h (flag_of_float f)) in
+      assert (Header.size h = 3 || Header.size h = 5);
+      let a' = Header.allocate_abstract_float h in
+      copy_payload a a';
+      copy_bounds a a';
+      (insert_float_in_bounds a' f; a')
+    end
 
 (* [normalize_zero_and_inf] allows [neg_u] (rep [pos_l]) to be -0.0 (resp +0.0),
    and [neg_l] (resp [pos_u]) to be infinite.
@@ -521,7 +783,7 @@ let normalize_for_mult = normalize_zero_and_inf Header.negative_zero
     of zeroes, infinies and NaNs and two pairs of normalish bounds
     that capture negative values and positive values.
     Normal bound, not inverted.
-    CR: is the result abstract_float always of size 5?
+    RH: is the result abstract_float always of size 5?
     PC: no, [Header.allocate_abstract_float header] allocates it of the
     right size, and only the bounds that exist are written to it. *)
 let inject header neg_l neg_u pos_l pos_u =
@@ -571,12 +833,14 @@ let pretty fmt a =
   then assert false;
   let l = Array.length a in
   if l >= 3 then
-    Format.fprintf fmt " U [%f..%f]" (~-. (a.(1))) a.(2);
+    Format.fprintf fmt "%s range [%f ... %f]\n"
+      (if Header.(test h negative_normalish) then "Negative" else "Positive")
+      (~-. (a.(1))) a.(2);
   if l = 5 then
-    Format.fprintf fmt " U [%f..%f]" (~-. (a.(3))) a.(4)
+    Format.fprintf fmt "Positive range [%f ... %f]\n"
+      (~-. (a.(3))) a.(4)
 
 (* *** Set operations *** *)
-
 let compare a1 a2 =
   let length  = Array.length a1 in
   let length2 = Array.length a2 in
@@ -626,7 +890,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       | true, false, theNaN, nonNaN | false, true, nonNaN, theNaN ->
         (* one of the FP numbers is NaN *)
         let h = Header.(of_flag at_least_one_NaN) in
-        let h = set_header_from_singleton nonNaN h in
+        let h = set_header_from_float nonNaN h in
         let a = Header.allocate_abstract_float_with_nan h theNaN in
         if Header.size h <> 2
         then begin
@@ -637,45 +901,116 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       | false, false, _, _ ->
         (* none of the FP numbers are NaN *)
         (* PC: I think this part can be made much more concise but I didn't
-           touch it. *)
-        let h = set_header_from_singleton f1 Header.bottom in
-        let h = set_header_from_singleton f2 h in
+           touch it.
+           RH: I tried to make more precise *)
+        let h = set_header_from_float f1 Header.bottom in
+        let h = set_header_from_float f2 h in
         let a = Header.allocate_abstract_float h in
         if Header.size h = 2 then a else begin
-          match classify_float f1, classify_float f2 with
-          | FP_zero, FP_normal | FP_infinite, FP_normal ->
-            if Header.size h = 3 then
-              (set_same_bound a f2; a)
-            else
-              raise Fetal_error_when_allocating_abstract_float
-          | FP_normal, FP_zero | FP_normal, FP_infinite ->
-            if Header.size h = 3 then
-              (set_same_bound a f1; a)
-            else
-              raise Fetal_error_when_allocating_abstract_float
-          | FP_nan, _ | _, FP_nan -> failwith "unexpected NaNs"
-          | FP_zero, FP_infinite | FP_infinite, FP_zero |
-            FP_infinite, FP_infinite | FP_zero, FP_zero ->
-            raise Fetal_error_when_allocating_abstract_float
-          | FP_subnormal, _ | _, FP_subnormal -> a
-          | FP_normal, FP_normal ->
+          match classify_float f1, classify_float f2, Header.size h with
+          | FP_zero, FP_normal, 3 | FP_infinite, FP_normal, 3 ->
+            (set_same_bound a f2; a)
+          | FP_normal, FP_zero, 3 | FP_normal, FP_infinite, 3 ->
+            (set_same_bound a f1; a)
+          | (FP_normal | FP_subnormal), (FP_normal | FP_subnormal), h -> begin
             let f1, f2 = if f1 < f2 then f1, f2 else f2, f1 in
-            match is_neg f1, is_neg f2 with
-            | (true, true) when Header.size h = 3 -> set_neg a f1 f2; a
-            | (false, false) when Header.size h = 3 -> set_pos a f1 f2; a
-            | (true, false) when Header.size h = 5 ->
-              set_neg a f1 f1; set_pos a f2 f2; a
-            | (false, true) when Header.size h = 5 ->
-              set_pos a f1 f1; set_neg a f2 f2; a
-            | _, _ -> raise Fetal_error_when_allocating_abstract_float
+            match is_neg f1, f1, is_neg f2, f2, h with
+            | true, _, true, _, 3 -> set_neg a f1 f2; a
+            | false, _, false, _, 3 -> set_pos a f1 f2; a
+            | true, f1, false, f2, 5 | false, f2, false, f1, 5 ->
+              (set_neg a f1 f1; set_pos a f2 f2; a)
+            | _, _, _, _, _ -> raise Fetal_error_when_allocating_abstract_float
+            end
+          | _, _, _ -> assert false
         end)
+    (* only one of [a1] and [a2] is singleton *)
     | true, false, single, non_single | false, true, non_single, single ->
-      (* one of [a1] and [a2] is singleton *)
-      assert false
+      merge_float non_single single.(0)
+    (* neither [a1] nor [a2] is singleton *)
     | false, false, _, _ ->
-      (* neither [a1] nor [a2] is singleton *)
-      assert false
+      let hn = Header.(combine (of_abstract_float a1) (of_abstract_float a2)) in
+      let an = Header.allocate_abstract_float hn in begin
+      (* assign payload in fresh abstract float *)
+      match Header.(test (of_abstract_float a1) at_least_one_NaN),
+            Header.(test hn at_least_one_NaN) with
+      | true, true -> copy_payload a1 an
+      | false, true -> copy_payload a2 an
+      | _, _ -> () end; begin
+      (* insert bounds from [a1] and [a2] to [an] *)
+      match Array.length a1, a1, Array.length a2, a2, Array.length an with
+      | 2, _, 2, _, 2 -> ()
+      | 2, _, (3 | 5) , amore, _ | (3 | 5), amore, 2, _, _ ->
+        copy_bounds amore an
+      | 3, aless, 5, amore, 5 |
+        5, amore, 3, aless, 5 |
+        3, aless, 3, amore, 3 |
+        5, aless, 5, amore, 5 -> begin
+          copy_bounds amore an;
+          insert_all_bounds aless an
+        end
+      | _, _, _, _, _ -> assert false
+      end;
+      an
   end
+
+module TestJoin = struct
+
+  let ppa a = pretty Format.std_formatter a
+
+  let nan_1 = 0x7FF0000000000001L
+  let nan_1 = 0x7FF0000000000002L
+
+  let nan_3 = 0xFFF0000000000001L
+  let nan_4 = 0xFFF7FFFFFFFFFFFFL
+
+  let a_neg_1 =
+    let h = Header.(set_flag bottom negative_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_neg_lower a (-5.0);
+    set_neg_upper a (-1.0);
+    a
+
+  let a_neg_2 =
+    let h = Header.(set_flag bottom negative_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_neg_lower a (-7.0);
+    set_neg_upper a (-2.0);
+    a
+
+  let a_pos_1 =
+    let h = Header.(set_flag bottom positive_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_pos_lower a (2.0);
+    set_pos_upper a (5.0);
+    a
+
+  let a_pos_2 =
+    let h = Header.(set_flag bottom positive_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_pos_lower a (3.0);
+    set_pos_upper a (7.0);
+    a
+
+  let a_neg_pos =
+    let h = Header.(set_flag bottom positive_normalish) in
+    let h = Header.(set_flag h negative_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_neg_lower a (-7.0);
+    set_neg_upper a (-2.0);
+    set_pos_lower a (1.0);
+    set_pos_upper a (11.0);
+    a
+
+  let test1 () =
+    ppa (join a_neg_1 a_neg_2)
+
+  let test2 () =
+    ppa (join a_neg_pos a_pos_2)
+
+end
+
+let () = TestJoin.test2 ()
+
 
 let meet a1 a2 = assert false
 
@@ -859,5 +1194,4 @@ let reverse_div1 a b =
 (* The set of values x such that a / x == b *)
 let reverse_div2 a b =
   assert false
-
 
