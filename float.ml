@@ -1,5 +1,6 @@
 let phys_equal = ( == )
 let (!=) = `Use_phys_equal
+let (==) = `Use_phys_equal
 
 type abstract_float = float array
 
@@ -328,9 +329,11 @@ end = struct
 
   let is_exactly h flag = h = flag
 
+  let normalish_mask = negative_normalish + positive_normalish
+
   let size h =
-    let posneg = h land 12 in
-    if posneg = 12 then 5
+    let posneg = h land normalish_mask in
+    if posneg = normalish_mask then 5
     else if posneg <> 0 then 3
     else 2
 
@@ -355,25 +358,29 @@ end = struct
       end
     | _ -> assert false
 
+(** [reconstruct_NaN a] returns the bits of the single NaN value
+    optionally contained in [a] *)
   let reconstruct_NaN a =
-    (assert (Array.length a >= 2));
+    assert (Array.length a >= 2);
     if test (of_abstract_float a) at_least_one_NaN then
-      Some (Int64.(logand 0x800FFFFFFFFFFFFFL (bits_of_float a.(0))))
+      Some (Int64.(logor 0x7ff0000000000000L (bits_of_float a.(0))))
     else
       None
 
   let is_header_included a1 a2 =
     assert (Array.length a1 >= 2);
     assert (Array.length a2 >= 2);
-    let h1, h2 = of_abstract_float a1, of_abstract_float a2 in
-    let potential_NaN_exists =
-      match reconstruct_NaN a1, reconstruct_NaN a2 with
-      | Some n1, Some n2 -> n1 = n2
-      | Some n1, None when test h2 all_NaNs -> true
-      | (None, _) ->
-        if test h1 all_NaNs then test h2 all_NaNs else true
-      | _, _ -> false in
-    (h2 lor h1 = h2) && potential_NaN_exists
+    let b1 = Int64.bits_of_float a1.(0) in
+    let b2 = Int64.bits_of_float a2.(0) in
+    let i1 = Int64.to_int b1 in
+    let i2 = Int64.to_int b2 in
+    i2 lor (i1 land 0x0FF0000000000000) = i2
+    &&
+      (* Still, if a1 and a2 contain one NaN each, we need to check for
+         exact correspondance of the payloads *)
+      (i1 land 0x0030000000000000 <> 0x0010000000000000 ||
+         i2 land 0x0030000000000000 <> 0x0010000000000000 ||
+         Int64.(logor b1 0x0FF0000000000000L = logor b2 0x0FF0000000000000L))
 
   let join h1 h2 =
     let h = combine h1 h2 in
@@ -638,7 +645,7 @@ let get_opp_finite_lower a =
   then get_opp_pos_lower a
   else neg_infinity
 
-(* [set_same_buond a f] sets pos or neg bound of [a] to [f].
+(* [set_same_bound a f] sets pos or neg bound of [a] to [f].
    [a] is expected to have size 3 (one header and one pair of bound *)
 let set_same_bound a f : unit =
   assert (let c = classify_float f in c = FP_normal || c = FP_subnormal);
@@ -710,15 +717,8 @@ let neg_zero = inject_float (-0.0)
 let abstract_infinity = inject_float infinity
 let abstract_neg_infinity = inject_float neg_infinity
 let abstract_all_NaNs = Header.(allocate_abstract_float (set_all_NaNs bottom))
-
-(*
-(** [reconstruct_NaN a] is the NaN reconstructred from payload of [a]
-    if [a] has header with [at_least_one_NaN] on *)
-let reconstruct_NaN a =
-  (assert (Array.length a >= 2));
-  (assert (Header.(test (of_abstract_float a) at_least_one_NaN)));
-  Int64.(logand 0x800FFFFFFFFFFFFFL (bits_of_float a.(0)))
-*)
+let bottom = Header.(allocate_abstract_float bottom)
+let is_bottom a = Array.length a = 2 && Header.(is_bottom (of_abstract_float a))
 
 let set_header_from_float f h =
   match classify_float f with
@@ -736,7 +736,7 @@ let merge_float a f =
   | (FP_zero | FP_infinite) ->
     let h = Header.(set_flag h (flag_of_float f)) in
     subst_header a h
-  (* singelton is NaN. Potential NaN value is reconstructed from
+  (* singleton is NaN. Potential NaN value is reconstructed from
      abstract float to determine if singleton is another kind of
      NaN. If yes, [all_NaNs] flag is set in abstract float's header.
      Cases:
@@ -750,7 +750,7 @@ let merge_float a f =
       | None -> if Header.(test h all_NaNs) then a else
           subst_header_with_NaN a f (Header.(set_flag h at_least_one_NaN))
       | Some n ->
-        if n = Int64.(logand (bits_of_float f) payload_mask) then a else
+        if n = Int64.bits_of_float f then a else
           subst_header a (Header.set_all_NaNs h)
     end
   (* singleton is normalish. A freshly abstract float will be allocated
@@ -910,50 +910,47 @@ let float_in_abstract_float f a =
         (is_neg f && Header.(test h negative_inf))
       | FP_nan -> begin
           match Header.reconstruct_NaN a with
-          | Some n -> f = Int64.(float_of_bits (logand (bits_of_float f) n))
+          | Some n -> Int64.bits_of_float f = n
           | None -> Header.(test h all_NaNs)
         end
       | FP_normal | FP_subnormal ->
-        s > 2 && (
-          (-.get_opp_neg_lower a) <= f && f <= (get_neg_upper a) ||
-          (-.get_opp_pos_lower a) <= f && f <= (get_pos_upper a))
+        s > 2 &&
+          let opp_f = -. f in
+          opp_f <= get_opp_neg_lower a && f <= (get_neg_upper a) ||
+            opp_f <= get_opp_pos_lower a && f <= (get_pos_upper a)
     end
   | _ -> assert false
 
 (* [is_included a1 a2] is a boolean value indicating if every element in [a1]
    is also an element in [a2] *)
 let is_included a1 a2 =
-  if equal a1 a2 then true else begin
-    let h1, h2 = Header.(of_abstract_float a1, of_abstract_float a2) in
-    match Array.length a1, Array.length a2 with
-    | 1, l2 -> float_in_abstract_float a1.(0) a2
-    | 3, (1 | 2) | 5, (1 | 2 | 3) -> false
-    | 2, 1 -> let f = a2.(0) in
-      (Header.(is_exactly h1 at_least_one_NaN) &&
-       classify_float f = FP_nan &&
-       Header.reconstruct_NaN a1 =
-        Some (Int64.(logand (bits_of_float f) payload_mask))) ||
-      (Header.(is_exactly h1 negative_inf) && is_inf f && is_neg f) ||
-      (Header.(is_exactly h1 positive_inf) && is_inf f && is_pos f) ||
-      (Header.(is_exactly h1 negative_zero) && is_zero f && is_neg f) ||
-      (Header.(is_exactly h1 positive_zero) && is_zero f && is_pos f)
-    | 2, (2 | 3 | 5) -> Header.is_header_included a1 a2
-    | 3, (3 | 5) | 5, 5 ->
-      let b = ref (Header.is_header_included a1 a2) in
-      for i = 1 to (Array.length a1 - 1) do
-        b := !b && (float_in_abstract_float
-                      (if i mod 2 = 1 then (-.a1.(i)) else a1.(i)) a2);
-      done;
-      !b
-    | _, _ -> assert false
-  end
+  match Array.length a1, Array.length a2 with
+  | 1, _ -> float_in_abstract_float a1.(0) a2
+  | 2, 1 -> is_bottom a1
+  | 2, _ -> Header.is_header_included a1 a2
+  | _, (1 | 2) | 5, 3 -> false
+  | l1, l2 ->
+    assert(l1 = 3 || l1 = 5);
+    assert(l2 = 3 || l2 = 5);
+    Header.is_header_included a1 a2 &&
+      let a11 = a1.(1) in
+      let a12 = a1.(2) in
+      let a21 = a2.(1) in
+      let a22 = a2.(2) in
+      if l1 = l2 || Header.(test (of_abstract_float a1) negative_normalish)
+      then
+        a11 <= a21 && a12 <= a22 &&
+          (l1 = 3 || (a1.(3) <= a2.(3) && a1.(4) <= a2.(4)))
+      else begin
+        assert (l1 = 3);
+        assert (l2 = 5);
+        assert (Header.(test (of_abstract_float a1) positive_normalish));
+        a11 <= a2.(3) && a12 <= a2.(4)
+      end
 
 (* [join a1 a2] is the smallest abstract state that contains every
    element from [a1] and every element from [a2]. *)
 let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
-  if equal a1 a2
-  then a1
-  else begin
     match is_singleton a1, is_singleton a2, a1, a2 with
     | true, true, _, _ ->
     (* both [a1] and [a2] are singletons *)
@@ -1031,7 +1028,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       | _, _, _, _, _ -> assert false
       end;
       an
-  end
+
 
 module Test = struct
 
