@@ -362,7 +362,7 @@ end = struct
     optionally contained in [a] *)
   let reconstruct_NaN a =
     assert (Array.length a >= 2);
-    if test (of_abstract_float a) at_least_one_NaN then
+    if exactly_one_NaN (of_abstract_float a) then
       Some (Int64.(logor 0x7ff0000000000000L (bits_of_float a.(0))))
     else
       None
