@@ -43,7 +43,6 @@ type abstract_float = float array
   - nonzero means the normalish and infinite components, but usually not NaN
 *)
 
-let is_zero f = classify_float f = FP_zero
 
 let sign_bit = 0x8000_0000_0000_0000L
 
@@ -51,16 +50,19 @@ let payload_mask = 0x800F_FFFF_FFFF_FFFFL
 
 let header_mask  = 0x0FF0_0000_0000_0000L
 
-let is_pos_zero f = Int64.bits_of_float f = 0L
-
-let is_neg_zero f = Int64.bits_of_float f = sign_bit
-
 let is_pos f = Int64.(logand (bits_of_float f) sign_bit) = 0L
 
 let is_neg f = Int64.(logand (bits_of_float f) sign_bit) <> 0L
 
 let is_NaN f = classify_float f = FP_nan
 
+let is_zero f = classify_float f = FP_zero
+
+let is_inf f = classify_float f = FP_infinite
+
+let is_pos_zero f = Int64.bits_of_float f = 0L
+
+let is_neg_zero f = Int64.bits_of_float f = sign_bit
 
 exception Invalid_abstract_float_length of int
 exception Fetal_error_when_allocating_abstract_float
@@ -191,6 +193,11 @@ module Header : sig
   val set_flag : t -> flag -> t
   (** [set t f] is [t] with flag [f] set *)
 
+(*
+  val is_included : t -> t -> bool
+  (** [is_included t1 t2] indicates if all information in [t1] exists in [t2] *)
+*)
+
   val flag_of_float : float -> flag
   (** [flag_of_float f] is flag that could be set by [f].
       [flag_of_float nan] is [at_least_one_NaN] *)
@@ -250,7 +257,6 @@ module Header : sig
   val div: t -> t -> t
   (** [div h1 h2] is the header of the result abstract float of division
         arithmetic operation of two abstract floats of headers [h1] and [h2] *)
-
 
 end = struct
   type t = int
@@ -628,7 +634,6 @@ let insert_neg_in_bounds a f : unit =
   assert (let c = classify_float f in c = FP_normal || c = FP_subnormal);
   assert (is_neg f);
   assert (Array.length a >= 3);
-  print_endline "good!";
   set_neg_lower a (min (-.(get_opp_neg_lower a)) f);
   set_neg_upper a (max (get_neg_upper a) f)
 
@@ -815,7 +820,7 @@ let inject header neg_l neg_u pos_l pos_u =
           then set_pos r pos_l pos_u;
           r
 
-(* pretty-printing *)
+(* [pretty fmt a] pretty-prints [a] on [fmt] *)
 let pretty fmt a =
   let h = Header.of_abstract_float a in
   Header.pretty fmt h;
@@ -831,6 +836,7 @@ let pretty fmt a =
       (~-. (a.(3))) a.(4)
 
 (* *** Set operations *** *)
+(* [compare a1 a2] is the order of [a1] and [a2] *)
 let compare a1 a2 =
   let length  = Array.length a1 in
   let length2 = Array.length a2 in
@@ -859,8 +865,73 @@ let compare a1 a2 =
 
 let equal a1 a2 = compare a1 a2 = 0
 
-(* Every element of a1 is an element of a2. *)
-let is_included a1 a2 = assert false
+(* [float_in_abstract_float f a] indicates if [f] is inside [a] *)
+let float_in_abstract_float f a =
+  match Array.length a with
+  | 1 -> (is_NaN f && is_NaN a.(0) &&
+          Int64.bits_of_float f = Int64.bits_of_float a.(0))
+         || f = a.(0)
+  | (2 | 3 | 5) as s -> begin
+      let h = Header.of_abstract_float a in
+      match classify_float f with
+      | FP_zero ->
+        (is_pos f && Header.(test h positive_zero)) ||
+        (is_neg f && Header.(test h negative_zero))
+      | FP_infinite ->
+        (is_pos f && Header.(test h positive_inf)) ||
+        (is_neg f && Header.(test h negative_inf))
+      | FP_nan -> Header.(test h at_least_one_NaN ||
+                          test h all_NaNs)
+      | FP_normal | FP_subnormal ->
+        s > 2 && (
+          (-.get_opp_neg_lower a) <= f && f <= (get_neg_upper a) ||
+          (-.get_opp_pos_lower a) <= f && f <= (get_pos_upper a))
+    end
+  | _ -> assert false
+
+let is_header_included a1 a2 =
+  assert (Array.length a1 >= 2);
+  assert (Array.length a2 >= 2);
+  let h1, h2 = Header.(of_abstract_float a1, of_abstract_float a2) in
+  let same_flag f = if Header.test h1 f then Header.test h2 f else true in
+  let non_NaN_flag_all_exist =
+    List.fold_left (fun acc f -> acc && same_flag f) true
+      Header.([negative_normalish; positive_normalish;
+               negative_inf; positive_inf; negative_zero; positive_zero]) in
+  let potential_NaN_exists =
+    if Header.(test h1 at_least_one_NaN) then
+      Header.(test h2 all_NaNs) ||
+      (Header.(test h2 at_least_one_NaN) &&
+       reconstruct_NaN a1 = reconstruct_NaN a2) else
+    if Header.(test h1 all_NaNs) then Header.(test h2 all_NaNs) else true in
+  non_NaN_flag_all_exist && potential_NaN_exists
+
+(* [is_included a1 a2] is a boolean value indicating if every element in [a1]
+   is also an element in [a2] *)
+let is_included a1 a2 =
+  if equal a1 a2 then true else begin
+    let h1, h2 = Header.(of_abstract_float a1, of_abstract_float a2) in
+    match Array.length a1, Array.length a2 with
+    | 1, l2 -> float_in_abstract_float a1.(0) a2
+    | 3, (1 | 2) | 5, (1 | 2 | 3) -> false
+    | 2, 1 -> let f = a2.(0) in
+      (Header.(is_exactly h1 at_least_one_NaN) &&
+       classify_float f = FP_nan &&
+       reconstruct_NaN a1 = Int64.(logand (bits_of_float f) payload_mask)) ||
+      (Header.(is_exactly h1 negative_inf) && is_inf f && is_neg f) ||
+      (Header.(is_exactly h1 positive_inf) && is_inf f && is_pos f) ||
+      (Header.(is_exactly h1 negative_zero) && is_zero f && is_neg f) ||
+      (Header.(is_exactly h1 positive_zero) && is_zero f && is_pos f)
+    | 2, (2 | 3 | 5) -> is_header_included a1 a2
+    | 3, (3 | 5) | 5, 5 ->
+      let b = ref (is_header_included a1 a2) in
+      for i = 1 to (Array.length a1 - 1) do
+        b := !b && (float_in_abstract_float
+                      (if i mod 2 = 1 then (-.a1.(i)) else a1.(i)) a2)
+      done;
+      !b
+    | _, _ -> assert false
+  end
 
 (* [join a1 a2] is the smallest abstract state that contains every
    element from [a1] and every element from [a2]. *)
@@ -938,12 +1009,16 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
           copy_bounds amore an;
           insert_all_bounds aless an
         end
+      | 3, aless, 3, amore, 5 -> begin
+          copy_bounds aless an;
+          copy_bounds amore an;
+        end
       | _, _, _, _, _ -> assert false
       end;
       an
   end
 
-module TestJoin = struct
+module Test = struct
 
   let ppa a = pretty Format.std_formatter a
 
@@ -991,13 +1066,24 @@ module TestJoin = struct
     set_pos_upper a (11.0);
     a
 
+
   let test1 () =
     ppa (join a_neg_1 a_neg_2)
 
   let test2 () =
     ppa (join a_neg_pos a_pos_2)
 
+  let test_include_1 () =
+    assert (is_included a_pos_1 (join a_pos_1 a_pos_2));
+    assert (is_included a_pos_2 (join a_pos_1 a_pos_2));
+    assert (is_included a_neg_1 (join a_neg_1 a_pos_2));
+    assert (is_included a_neg_1 (join a_neg_1 a_neg_2));
+    assert (is_included a_neg_2 (join a_neg_1 a_neg_2));
+    assert (is_included a_neg_2 (join a_pos_1 a_neg_2))
+
 end
+
+let () = Test.test_include_1 ()
 
 (*
 let () = TestJoin.test2 ()
