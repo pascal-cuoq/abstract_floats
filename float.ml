@@ -896,9 +896,7 @@ let equal a1 a2 = compare a1 a2 = 0
 (* [float_in_abstract_float f a] indicates if [f] is inside [a] *)
 let float_in_abstract_float f a =
   match Array.length a with
-  | 1 -> (is_NaN f && is_NaN a.(0) &&
-          Int64.bits_of_float f = Int64.bits_of_float a.(0))
-         || f = a.(0)
+  | 1 -> Int64.bits_of_float f = Int64.bits_of_float a.(0))
   | (2 | 3 | 5) as s -> begin
       let h = Header.of_abstract_float a in
       match classify_float f with
