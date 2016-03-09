@@ -543,14 +543,16 @@ let erase_payload a =
 let subst_header (a: abstract_float) (h: Header.t) =
   assert (Array.length a >= 2);
   let a = Array.copy a in
-  let potential_payload = Int64.(logand (bits_of_float a.(0)) payload_mask) in
   (if Header.(test h all_NaNs) then
      (** if all_NaN flag is on, potential payload is erased *)
      a.(0) <- (Header.allocate_abstract_float h).(0)
    else begin
+     let potential_payload = Int64.(logand (bits_of_float a.(0)) payload_mask)
+     in
      let cell =
         Int64.(logor
                  (bits_of_float (Header.allocate_abstract_float h).(0))
+               (* TODO: cleanup ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ *)
                  potential_payload) in
      a.(0) <- Int64.float_of_bits cell
    end);
@@ -562,6 +564,7 @@ let subst_header_with_NaN (a: abstract_float) (fNaN: float) (h: Header.t) =
   assert (Array.length a >= 2);
   let a = Array.copy a in
   a.(0) <- (Header.allocate_abstract_float_with_NaN h fNaN).(0);
+(* TODO: cleanup ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ *)
   a
 
 (** [set_neg_lower a f] sets lower bound of negative normalish to [-. f] *)
@@ -732,36 +735,39 @@ let merge_float a f =
   assert (Array.length a >= 2);
   let h = Header.of_abstract_float a in
   match classify_float f with
-  (* singleton is zero (pos and neg) or infinity (pos and neg) *)
   | (FP_zero | FP_infinite) ->
-    let h = Header.(set_flag h (flag_of_float f)) in
-    subst_header a h
-  (* singleton is NaN. Potential NaN value is reconstructed from
-     abstract float to determine if singleton is another kind of
-     NaN. If yes, [all_NaNs] flag is set in abstract float's header.
-     Cases:
-       Header with at_least_one_NaN when payload same -> do nothing
-       Header with at_least_one_NaN when payload diff -> set all_NaNs flag
-       Header with all_NaNs -> do nothing
-       Others -> set payload, set at_least_one_NaN flag
-   *)
-  | FP_nan -> begin
+    let h_new = Header.(set_flag h (flag_of_float f)) in
+    if h_new = h
+    then a
+    else subst_header a h
+  | FP_nan ->
+    begin
+    (* [f] is NaN. Potential NaN value is reconstructed from
+       abstract float to determine if [f] is a different representation of NaN.
+       If different, [all_NaNs] flag is set in abstract float's header. *)
       match Header.reconstruct_NaN a with
-      | None -> if Header.(test h all_NaNs) then a else
+      | None ->
+        if Header.(test h all_NaNs)
+        then a
+        else
           subst_header_with_NaN a f (Header.(set_flag h at_least_one_NaN))
-      | Some n ->
-        if n = Int64.bits_of_float f then a else
-          subst_header a (Header.set_all_NaNs h)
+    | Some n ->
+      if n = Int64.bits_of_float f
+      then a
+      else
+        subst_header a (Header.set_all_NaNs h)
     end
-  (* singleton is normalish. A freshly abstract float will be allocated
-     based on [a]. New header and original potential payload are set. *)
-  | _ -> begin
+  | FP_normal | FP_subnormal ->
+    begin
+      (* [f] is normalish. A freshly abstract float is allocated
+         based on [a]. New header and original potential payload are set. *)
       let h = Header.(set_flag h (flag_of_float f)) in
       assert (Header.size h = 3 || Header.size h = 5);
       let a' = Header.allocate_abstract_float h in
       copy_payload a a';
       copy_bounds a a';
-      (insert_float_in_bounds a' f; a')
+      insert_float_in_bounds a' f;
+      a'
     end
 
 (* [normalize_zero_and_inf] allows [neg_u] (rep [pos_l]) to be -0.0 (resp +0.0),
@@ -896,7 +902,7 @@ let equal a1 a2 = compare a1 a2 = 0
 (* [float_in_abstract_float f a] indicates if [f] is inside [a] *)
 let float_in_abstract_float f a =
   match Array.length a with
-  | 1 -> Int64.bits_of_float f = Int64.bits_of_float a.(0))
+  | 1 -> Int64.bits_of_float f = Int64.bits_of_float a.(0)
   | (2 | 3 | 5) as s -> begin
       let h = Header.of_abstract_float a in
       match classify_float f with
@@ -971,29 +977,28 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
         a
       | false, false, _, _ ->
         (* none of the FP numbers are NaN *)
-        (* PC: I think this part can be made much more concise but I didn't
-           touch it.
-           RH: I tried to make more concise *)
         let h = set_header_from_float f1 Header.bottom in
         let h = set_header_from_float f2 h in
         let a = Header.allocate_abstract_float h in
-        if Header.size h = 2 then a else begin
-          match classify_float f1, classify_float f2, Header.size h with
-          | FP_zero, FP_normal, 3 | FP_infinite, FP_normal, 3 ->
-            (set_same_bound a f2; a)
-          | FP_normal, FP_zero, 3 | FP_normal, FP_infinite, 3 ->
-            (set_same_bound a f1; a)
-          | (FP_normal | FP_subnormal), (FP_normal | FP_subnormal), h -> begin
-            let f1, f2 = if f1 < f2 then f1, f2 else f2, f1 in
-            match is_neg f1, f1, is_neg f2, f2, h with
-            | true, _, true, _, 3 -> set_neg a f1 f2; a
-            | false, _, false, _, 3 -> set_pos a f1 f2; a
-            | true, f1, false, f2, 5 | false, f2, false, f1, 5 ->
-              (set_neg a f1 f1; set_pos a f2 f2; a)
-            | _, _, _, _, _ -> assert false
+        let s = Array.length a in
+        if s > 2 then begin
+          match classify_float f1, classify_float f2 with
+          | (FP_zero | FP_infinite), (FP_normal | FP_subnormal) ->
+            set_same_bound a f2
+          | (FP_normal | FP_subnormal), (FP_zero | FP_infinite) ->
+            set_same_bound a f1
+          | (FP_normal | FP_subnormal), (FP_normal | FP_subnormal) ->
+            begin
+              let f1, f2 = if f1 < f2 then f1, f2 else f2, f1 in
+              match is_neg f1,is_neg f2 with
+              | true, true -> set_neg a f1 f2
+              | false, false -> set_pos a f1 f2
+              | true, false -> set_neg a f1 f1; set_pos a f2 f2
+              | _, _ -> assert false
             end
-          | _, _, _ -> assert false
-        end)
+          | _ -> assert false
+        end;
+        a)
     (* only one of [a1] and [a2] is singleton *)
     | true, false, single, non_single | false, true, non_single, single ->
       merge_float non_single single.(0)
