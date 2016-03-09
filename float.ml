@@ -1197,10 +1197,11 @@ let binop scalar_op expanded_op a1 a2 =
   let single_a2 = is_singleton a2 in
   if single_a1 && single_a2
   then
-    let result = scalar_op a1.(0) a2.(0) in
+    let result = [| 0.0 |] in
+    scalar_op result a1 a2;
     if result <> result (* NaN *)
     then abstract_all_NaNs
-    else inject_float result
+    else result
   else
     let a1 = if single_a1 then expand a1 else a1 in
     let a2 = if single_a2 then expand a2 else a2 in
@@ -1208,7 +1209,7 @@ let binop scalar_op expanded_op a1 a2 =
 
 (** [add a1 a2] returns the set of values that can be taken by adding a value
    from [a1] to a value from [a2]. *)
-let add a1 a2 = binop (+.) add_expanded
+let add = binop (fun r a1 a2 -> r.(0) <- a1.(0) +. a2.(0)) add_expanded
 
 let sub_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
@@ -1227,7 +1228,7 @@ let sub_expanded a1 a2 =
   in
   inject header neg_l neg_u pos_l pos_u
 
-let sub a1 a2 = binop (-.) sub_expanded
+let sub = binop (fun r a1 a2 -> r.(0) <- a1.(0) -. a2.(0)) sub_expanded
 
 let mult_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
@@ -1247,7 +1248,7 @@ let mult_expanded a1 a2 =
 
 (** [mult a1 a2] returns the set of values that can be taken by multiplying
     a value from [a1] with a value from [a2]. *)
-let mult a1 a2 = binop ( *. ) mult_expanded
+let mult = binop (fun r a1 a2 -> r.(0) <- a1.(0) *. a2.(0)) mult_expanded
 
 let div_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
@@ -1267,7 +1268,7 @@ let div_expanded a1 a2 =
 
 (** [div a1 a2] returns the set of values that can be taken by dividing
     a value from [a1] by a value from [a2]. *)
-let div a1 a2 = binop ( /. ) div_expanded
+let div = binop (fun r a1 a2 -> r.(0) <- a1.(0) /. a2.(0)) div_expanded
 
 (* *** Backwards functions *** *)
 
