@@ -59,7 +59,7 @@ let is_pos f = Int64.(logand (bits_of_float f) sign_bit) = 0L
 
 let is_neg f = Int64.(logand (bits_of_float f) sign_bit) <> 0L
 
-let is_nan f = classify_float f = FP_nan
+let is_NaN f = classify_float f = FP_nan
 
 
 exception Invalid_abstract_float_length of int
@@ -334,10 +334,10 @@ end = struct
   let allocate_abstract_float_with_NaN h f =
     match classify_float f with
     | FP_nan -> begin
-        let nan_payload =
+        let payload =
           Int64.(logand (bits_of_float f) (0x800FFFFFFFFFFFFFL)) in
         let with_flags =
-          Int64.(float_of_bits (logor (of_int (h lsl 52)) nan_payload)) in
+          Int64.(float_of_bits (logor (of_int (h lsl 52)) payload)) in
         Array.make (size h) with_flags
       end
     | _ -> assert false
@@ -518,10 +518,10 @@ let subst_header (a: abstract_float) (h: Header.t) =
 
 (** [subst_header_with_nan a f h] is a freshly allocated abstract float that
     is the same as [a], but with a new header [h] and payload from [f] *)
-let subst_header_with_NaN (a: abstract_float) (fnan: float) (h: Header.t) =
+let subst_header_with_NaN (a: abstract_float) (fNaN: float) (h: Header.t) =
   assert (Array.length a >= 2);
   let a = Array.copy a in
-  a.(0) <- (Header.allocate_abstract_float_with_NaN h fnan).(0);
+  a.(0) <- (Header.allocate_abstract_float_with_NaN h fNaN).(0);
   a
 
 (** [set_neg_lower a f] sets lower bound of negative normalish to [-. f] *)
@@ -679,9 +679,9 @@ let abstract_infinity = inject_float infinity
 let abstract_neg_infinity = inject_float neg_infinity
 let abstract_all_NaNs = Header.(allocate_abstract_float (set_all_NaNs bottom))
 
-(** [reconstruct_nan a] is the NaN reconstructred from payload of [a]
+(** [reconstruct_NaN a] is the NaN reconstructred from payload of [a]
     if [a] has header with [at_least_one_NaN] on *)
-let reconstruct_nan a =
+let reconstruct_NaN a =
   (assert (Array.length a >= 2));
   (assert (Header.(test (of_abstract_float a) at_least_one_NaN)));
   Int64.(logand 0x800FFFFFFFFFFFFFL (bits_of_float a.(0)))
@@ -713,7 +713,7 @@ let merge_float a f =
    *)
   | FP_nan -> begin
       if Header.(test h at_least_one_NaN) then begin
-        if reconstruct_nan a =
+        if reconstruct_NaN a =
            Int64.(logand (bits_of_float f) payload_mask) then a else
           subst_header a (Header.set_all_NaNs h)
       end else
@@ -872,7 +872,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
     | true, true, _, _ ->
     (* both [a1] and [a2] are singletons *)
       let f1, f2 = a1.(0), a2.(0) in
-      ( match is_nan f1, is_nan f2, f1, f2 with
+      ( match is_NaN f1, is_NaN f2, f1, f2 with
       | true, true, _, _ ->
         (* the representation of the two NaNs is different because
            the case [equal a1 a2] has been handled. *)
@@ -892,7 +892,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
         (* none of the FP numbers are NaN *)
         (* PC: I think this part can be made much more concise but I didn't
            touch it.
-           RH: I tried to make more precise *)
+           RH: I tried to make more concise *)
         let h = set_header_from_float f1 Header.bottom in
         let h = set_header_from_float f2 h in
         let a = Header.allocate_abstract_float h in
@@ -947,11 +947,11 @@ module TestJoin = struct
 
   let ppa a = pretty Format.std_formatter a
 
-  let nan_1 = 0x7FF0000000000001L
-  let nan_1 = 0x7FF0000000000002L
+  let fNaN_1 = 0x7FF0000000000001L
+  let fNaN_2 = 0x7FF0000000000002L
 
-  let nan_3 = 0xFFF0000000000001L
-  let nan_4 = 0xFFF7FFFFFFFFFFFFL
+  let fNaN_3 = 0xFFF0000000000001L
+  let fNaN_4 = 0xFFF7FFFFFFFFFFFFL
 
   let a_neg_1 =
     let h = Header.(set_flag bottom negative_normalish) in
@@ -999,7 +999,9 @@ module TestJoin = struct
 
 end
 
+(*
 let () = TestJoin.test2 ()
+*)
 
 
 let meet a1 a2 = assert false
