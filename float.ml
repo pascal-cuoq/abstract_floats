@@ -203,14 +203,16 @@ module Header : sig
   val is_bottom : t -> bool
   (** [is_bottom t] indicates whether [t] is bottom *)
 
-  val pretty: Format.formatter -> t -> unit
-  (** [pretty fmt t] pretty-prints [t] on [fmt] *)
+  val pretty: Format.formatter -> abstract_float -> unit
+  (** [pretty fmt a] pretty-prints the header of [a] on [fmt] *)
 
   val combine : t -> t -> t
   (** [combine t1 t2] is the join of [t1] and [t2] *)
 
   val test : t -> flag -> bool
   (** [test t f] indicates whether [f] is set in [t] *)
+
+  val has_inf_zero_or_NaN : abstract_float -> bool
 
   val set_flag : t -> flag -> t
   (** [set t f] is [t] with flag [f] set *)
@@ -259,7 +261,7 @@ module Header : sig
   val is_header_included : abstract_float -> abstract_float -> bool
   (** [is_header_included a1 a2] is true if [a2]'s header has all the
       information [a1]'s header has *)
-  
+
   val join : t -> t -> abstract_float
   (** [join h1 h2] is an abstract float with header properly set by
       [Header.combine] *)
@@ -320,30 +322,58 @@ end = struct
   let get_NaN_part h = h land (at_least_one_NaN + all_NaNs)
   let exactly_one_NaN h = (get_NaN_part h) = at_least_one_NaN
 
-  let pretty fmt h =
+  let of_abstract_float a =
+    assert (Array.length a >= 2);
+    let l = Int64.shift_right_logical (Int64.bits_of_float a.(0)) 52 in
+    (Int64.to_int l) land 255
+
+  let has_inf_zero_or_NaN a =
+    assert (Array.length a >= 2);
+    let exceptional_flags =
+      positive_inf + negative_inf + positive_zero + negative_zero +
+        at_least_one_NaN
+    in
+    (of_abstract_float a) land exceptional_flags <> 0
+
+  let naN_of_abstract_float a =
+    Int64.(logor 0x7ff0000000000000L (bits_of_float a.(0)))
+
+  let pretty fmt a =
+    let h = of_abstract_float a in
     let bottom = is_bottom h in
     if bottom then
-      Format.fprintf fmt "Bottom"
-    else
-      let pp_tuple_list fmt l =
-        let ml = List.fold_left
-            (fun m t -> max m (String.length (fst t))) 0 l in
-        let pad s = String.make (ml + 1 - String.length s) ' ' in
-        let rec loop fmt = function
-          | [] -> ()
-          | (s, b) :: t ->
-            Format.fprintf fmt "%s%s: %B@,%a" s (pad s) b loop t in
-        loop fmt l in
-      let tl =
-        ["At least one NaN",   test h at_least_one_NaN;
-         "All NaNs",           test h all_NaNs;
-         "Negative normalish", test h negative_normalish;
-         "Positive normalish", test h positive_normalish;
-         "Negative infinity",  test h negative_inf;
-         "Positive infinity",  test h positive_inf;
-         "Negative zero",      test h negative_zero;
-         "Positive zero",      test h positive_zero] in
-      Format.fprintf fmt "@[<v>%a@]@." pp_tuple_list tl
+      Format.fprintf fmt "{ }"
+    else begin
+      Format.fprintf fmt "{";
+      let started = ref false in
+      let comma fmt =
+        if !started then Format.fprintf fmt ",";
+        started := true;
+      in
+      let add fmt sign symb =
+        comma fmt;
+        Format.fprintf fmt sign;
+        Format.fprintf fmt symb
+      in
+      let print_sign i symb =
+        match i land 3 with
+        | 0 -> ()
+        | 1 -> add fmt "-" symb
+        | 2 -> add fmt "+" symb
+        | 3 -> add fmt "±" symb
+        | _ -> assert false
+      in
+      print_sign (h lsr 6) "0";
+      print_sign (h lsr 4) "∞";
+      if get_NaN_part h <> 0
+      then begin
+        comma fmt;
+        Format.fprintf fmt "NaN";
+        if not (test h all_NaNs)
+        then Format.fprintf fmt ":%Lx" (naN_of_abstract_float a)
+      end;
+      Format.fprintf fmt "}";
+    end
 
   let is_exactly h flag = h = flag
 
@@ -354,11 +384,6 @@ end = struct
     if posneg = normalish_mask then 5
     else if posneg <> 0 then 3
     else 2
-
-  let of_abstract_float a =
-    assert (Array.length a >= 2);
-    let l = Int64.shift_right_logical (Int64.bits_of_float a.(0)) 52 in
-    (Int64.to_int l) land 255
 
   let allocate_abstract_float h =
     Array.make
@@ -378,7 +403,7 @@ end = struct
   let reconstruct_NaN a =
     assert (Array.length a >= 2);
     if exactly_one_NaN (of_abstract_float a) then
-      Some (Int64.(logor 0x7ff0000000000000L (bits_of_float a.(0))))
+      Some (naN_of_abstract_float a)
     else
       None
 
@@ -549,11 +574,15 @@ let copy_bounds a1 a2 =
     done
   | _ -> assert false
 
-(** [set_neg_lower a f] sets lower bound of negative normalish to [-. f] *)
+(** [set_opp_neg_lower a f] sets lower bound of negative normalish to [-. f] *)
+let set_opp_neg_lower a f =
+  assert(0.0 < f);
+  assert(f < infinity);
+  a.(1) <- f
+
+(** [set_neg_lower a f] sets lower bound of positive normalish to [f] *)
 let set_neg_lower a f =
-  assert(neg_infinity < f);
-  assert(f < 0.0);
-  a.(1) <- -. f
+  set_opp_neg_lower a (-. f)
 
 (** [set_neg_upper a f] sets upper bound of negative normalish to [f] *)
 let set_neg_upper a f =
@@ -561,7 +590,7 @@ let set_neg_upper a f =
   assert(f < 0.0);
   a.(2) <- f
 
-(** [set_neg a fl fu] sets bounds of negative normalish to [fl] and [fu] *)
+(** [set_neg a l u] sets bounds of negative normalish to [l] and [u] *)
 let set_neg a l u =
   assert(neg_infinity < l);
   assert(l <= u);
@@ -569,11 +598,15 @@ let set_neg a l u =
   a.(1) <- -. l;
   a.(2) <- u
 
-(** [set_neg_lower a f] sets lower bound of positive normalish to [-. f] *)
+(** [set_opp_pos_lower a f] sets lower bound of positive normalish to [-. f] *)
+let set_opp_pos_lower a f =
+  assert(neg_infinity < f);
+  assert(f < 0.0);
+  a.(Array.length a - 2) <- f
+
+(** [set_pos_lower a f] sets lower bound of positive normalish to [f] *)
 let set_pos_lower a f =
-  assert(0.0 < f);
-  assert(f < infinity);
-  a.(Array.length a - 2) <- -. f
+  set_opp_pos_lower a (-. f)
 
 (** [set_pos_upper a f] sets upper bound of positive normalish to [f] *)
 let set_pos_upper a f =
@@ -581,7 +614,7 @@ let set_pos_upper a f =
   assert(f < infinity);
   a.(Array.length a - 1) <- f
 
-(** [set_pos a fl fu] sets bound of positive normalish to [fl] and [fu] *)
+(** [set_pos a l u] sets bound of positive normalish to [l] and [u] *)
 let set_pos a l u =
   assert(0.0 < l);
   assert(l <= u);
@@ -706,10 +739,8 @@ let bottom = Header.(allocate_abstract_float bottom)
 let is_bottom a = Array.length a = 2 && Header.(is_bottom (of_abstract_float a))
 
 let set_header_from_float f h =
-  match classify_float f with
-  | FP_nan -> invalid_arg "cannot handle NaN values: payload of NaN cannot be
-                properly set using Header.set_flag"
-  | _ -> Header.(set_flag h (flag_of_float f))
+  assert (classify_float f <> FP_nan);
+  Header.(set_flag h (flag_of_float f))
 
 (** [merge_float a f] is a freshly allocated abstract float, which is
     of the result of the merge of [f] and [a].
@@ -850,18 +881,37 @@ let inject header neg_l neg_u pos_l pos_u =
           then set_pos r pos_l pos_u;
           r
 
+let print_union fmt = Format.fprintf fmt " ∪ "
+
 (* [pretty fmt a] pretty-prints [a] on [fmt] *)
 let pretty fmt a =
-  let h = Header.of_abstract_float a in
-  Header.pretty fmt h;
-  let l = Array.length a in
-  if l >= 3 then
-    Format.fprintf fmt "%s range [%f ... %f]\n"
-      (if Header.(test h negative_normalish) then "Negative" else "Positive")
-      (~-. (a.(1))) a.(2);
-  if l = 5 then
-    Format.fprintf fmt "Positive range [%f ... %f]\n"
-      (~-. (a.(3))) a.(4)
+  match a with
+  | [| f |] -> Format.fprintf fmt "{%f}" f
+  | _ ->
+    let le = Array.length a in
+    let l3 = le >= 3 in
+    if Header.has_inf_zero_or_NaN a
+    then begin
+      Header.pretty fmt a;
+      if l3 then print_union fmt
+    end;
+    if l3 then
+      let l = ~-. (a.(1)) in
+      let u = a.(2) in
+      if l = u then
+        Format.fprintf fmt "{%f}" l
+      else
+        Format.fprintf fmt "[%f ... %f]" l u;
+      if le = 5
+      then begin
+        print_union fmt;
+        let l = ~-. (a.(3)) in
+        let u = a.(4) in
+        if l = u then
+          Format.fprintf fmt "{%f}" l
+        else
+          Format.fprintf fmt "[%f ... %f]" l u
+      end
 
 (* *** Set operations *** *)
 (* [compare a1 a2] is the order of [a1] and [a2] *)
@@ -1041,11 +1091,12 @@ module Test = struct
 
   let fNaN_1 = Int64.float_of_bits 0x7FF0000000000001L
   let fNaN_2 = Int64.float_of_bits 0x7FF0000000000002L
-               
+
   let fNaN_3 = Int64.float_of_bits 0xFFF0000000000001L
   let fNaN_4 = Int64.float_of_bits 0xFFF7FFFFFFFFFFFFL
-                
+
   let test (a1, s1) (a2, s2) =
+    Format.printf "%a; %a; %a@\n" pretty a1 pretty a2 pretty (join a1 a2);
     if is_included a1 (join a1 a2) then
       Printf.printf "Success!\n"
     else begin
@@ -1188,7 +1239,7 @@ let neg a =
 let abstract_sqrt a =
   if is_singleton a
   then begin
-    let a = sqrt (a.(0)) in
+    let a = sqrt a.(0) in
     if a <> a
     then abstract_all_NaNs
     else inject_float a
