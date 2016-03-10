@@ -74,9 +74,9 @@ exception Fetal_error_when_allocating_abstract_float
 (*
              ***** UNITY OF REPRESENTATION *****
 
-                        *** Rule 1 ***
+                        ( UoR )
 
-       Every abstract float has one and only one representation
+    Every abstract float has one and only one representation
 
   1. Single floats include positive zero, negative zero,
      positive infinity, negative infinity, NaN value should
@@ -259,7 +259,7 @@ module Header : sig
   val is_header_included : abstract_float -> abstract_float -> bool
   (** [is_header_included a1 a2] is true if [a2]'s header has all the
       information [a1]'s header has *)
-
+  
   val join : t -> t -> abstract_float
   (** [join h1 h2] is an abstract float with header properly set by
       [Header.combine] *)
@@ -366,15 +366,12 @@ end = struct
       (Int64.float_of_bits (Int64.of_int (h lsl 52)))
 
   let allocate_abstract_float_with_NaN h f =
-    match classify_float f with
-    | FP_nan -> begin
-        let payload =
-          Int64.(logand (bits_of_float f) (0x800FFFFFFFFFFFFFL)) in
-        let with_flags =
-          Int64.(float_of_bits (logor (of_int (h lsl 52)) payload)) in
-        Array.make (size h) with_flags
-      end
-    | _ -> assert false
+    assert (classify_float f = FP_nan);
+    let payload =
+      Int64.(logand (bits_of_float f) (0x800FFFFFFFFFFFFFL)) in
+    let with_flags =
+      Int64.(float_of_bits (logor (of_int (h lsl 52)) payload)) in
+    Array.make (size h) with_flags
 
 (** [reconstruct_NaN a] returns the bits of the single NaN value
     optionally contained in [a] *)
@@ -524,15 +521,17 @@ Each pair of bounds of a same sign is represented as -lower_bound, upper_bound.
 *)
 
 (** [copy_payload a1 a2] will copy potential payload of [a1] to [a2] *)
-let copy_payload a1 a2 =
+let copy_payload a1 a2 = `Deprecated
+(*
   assert (Array.length a1 >= 2);
-  assert (Array.length a2 >= 2);
+  assert (Array.length a2 > 2); (* assertion to guarantee UoR *)
   let potential_payload = Int64.(logand (bits_of_float a1.(0)) payload_mask) in
   a2.(0) <- Int64.(float_of_bits
                      (logor (bits_of_float a2.(0)) potential_payload))
+*)
 
 (** [copy_bounds a1 a2] will copy bounds of [a1] to the freshly
-    allocated [a2] *)
+    allocated [a2]. This does not break UoR *)
 let copy_bounds a1 a2 =
   assert (Array.length a1 >= 2);
   assert (Array.length a2 >= 2);
@@ -549,41 +548,6 @@ let copy_bounds a1 a2 =
       a2.(i) <- a1.(i)
     done
   | _ -> assert false
-
-(** [erase_payload a] will erase potential payload in [a] *)
-let erase_payload a =
-  assert (Array.length a >= 2);
-  a.(0) <- Int64.(float_of_bits (logand (bits_of_float a.(0)) header_mask))
-
-(** [subst_header a h] is a freshly allocated abstract float that
-    is the same as [a], but with a new header [h] set. Potential payload
-    is preserved *)
-let subst_header (a: abstract_float) (h: Header.t) =
-  assert (Array.length a >= 2);
-  let a = Array.copy a in
-  (if Header.(test h all_NaNs) then
-     (** if all_NaN flag is on, potential payload is erased *)
-     a.(0) <- (Header.allocate_abstract_float h).(0)
-   else begin
-     let potential_payload = Int64.(logand (bits_of_float a.(0)) payload_mask)
-     in
-     let cell =
-        Int64.(logor
-                 (bits_of_float (Header.allocate_abstract_float h).(0))
-               (* TODO: cleanup ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ *)
-                 potential_payload) in
-     a.(0) <- Int64.float_of_bits cell
-   end);
-  a
-
-(** [subst_header_with_nan a f h] is a freshly allocated abstract float that
-    is the same as [a], but with a new header [h] and payload from [f] *)
-let subst_header_with_NaN (a: abstract_float) (fNaN: float) (h: Header.t) =
-  assert (Array.length a >= 2);
-  let a = Array.copy a in
-  a.(0) <- (Header.allocate_abstract_float_with_NaN h fNaN).(0);
-(* TODO: cleanup ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ *)
-  a
 
 (** [set_neg_lower a f] sets lower bound of negative normalish to [-. f] *)
 let set_neg_lower a f =
@@ -748,7 +712,8 @@ let set_header_from_float f h =
   | _ -> Header.(set_flag h (flag_of_float f))
 
 (** [merge_float a f] is a freshly allocated abstract float, which is
-    of the result of the merge of [f] and [a] *)
+    of the result of the merge of [f] and [a].
+    TODO: abstract reconstruct.. some ... none *)
 let merge_float a f =
   assert (Array.length a >= 2);
   let h = Header.of_abstract_float a in
@@ -757,7 +722,14 @@ let merge_float a f =
     let h_new = Header.(set_flag h (flag_of_float f)) in
     if h_new = h
     then a
-    else subst_header a h
+    else begin
+      let a' =
+        match Header.reconstruct_NaN a with
+        | Some n -> Header.allocate_abstract_float_with_NaN h_new
+                      (Int64.float_of_bits n)
+        | None -> Header.allocate_abstract_float h_new in
+      copy_bounds a a'; a'
+    end
   | FP_nan ->
     begin
     (* [f] is NaN. Potential NaN value is reconstructed from
@@ -768,12 +740,15 @@ let merge_float a f =
         if Header.(test h all_NaNs)
         then a
         else
-          subst_header_with_NaN a f (Header.(set_flag h at_least_one_NaN))
-    | Some n ->
-      if n = Int64.bits_of_float f
-      then a
-      else
-        subst_header a (Header.set_all_NaNs h)
+          let h = Header.(set_flag h at_least_one_NaN) in
+          let anew = Header.allocate_abstract_float_with_NaN h f in
+          copy_bounds a anew; anew
+      | Some n ->
+        if n = Int64.bits_of_float f
+        then a
+        else
+          let anew = Header.allocate_abstract_float (Header.set_all_NaNs h) in
+          copy_bounds a anew; anew
     end
   | FP_normal | FP_subnormal ->
     begin
@@ -781,8 +756,11 @@ let merge_float a f =
          based on [a]. New header and original potential payload are set. *)
       let h = Header.(set_flag h (flag_of_float f)) in
       assert (Header.size h = 3 || Header.size h = 5);
-      let a' = Header.allocate_abstract_float h in
-      copy_payload a a';
+      let a' =
+        match Header.reconstruct_NaN a with
+        | Some n -> Header.allocate_abstract_float_with_NaN h
+                      (Int64.float_of_bits n)
+        | None -> Header.allocate_abstract_float h in
       copy_bounds a a';
       insert_float_in_bounds a' f;
       a'
@@ -876,8 +854,6 @@ let inject header neg_l neg_u pos_l pos_u =
 let pretty fmt a =
   let h = Header.of_abstract_float a in
   Header.pretty fmt h;
-  if Header.exactly_one_NaN h
-  then assert false;
   let l = Array.length a in
   if l >= 3 then
     Format.fprintf fmt "%s range [%f ... %f]\n"
@@ -1023,13 +999,18 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
     (* neither [a1] nor [a2] is singleton *)
     | false, false, _, _ ->
       let hn = Header.(combine (of_abstract_float a1) (of_abstract_float a2)) in
-      let an = Header.allocate_abstract_float hn in begin
-      (* assign payload in fresh abstract float *)
-      match Header.(test (of_abstract_float a1) at_least_one_NaN),
-            Header.(test hn at_least_one_NaN) with
-      | true, true -> copy_payload a1 an
-      | false, true -> copy_payload a2 an
-      | _, _ -> () end; begin
+      let an =
+        match Header.(reconstruct_NaN a1, reconstruct_NaN a2) with
+        | Some n1, Some n2 ->
+          if n1 <> n2 then
+            Header.allocate_abstract_float hn
+          else
+            Header.allocate_abstract_float_with_NaN hn (Int64.float_of_bits n1)
+        | None, None -> Header.allocate_abstract_float hn
+        | Some n1, None | None, Some n1 ->
+          let fnan = Int64.float_of_bits n1 in
+          Header.allocate_abstract_float_with_NaN hn fnan in
+      begin
       (* insert bounds from [a1] and [a2] to [an] *)
       match Array.length a1, a1, Array.length a2, a2, Array.length an with
       | 2, _, 2, _, 2 -> ()
@@ -1050,44 +1031,91 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       end;
       an
 
-
 module Test = struct
 
-  let ppa a = pretty Format.std_formatter a
+  let ppa a =
+    if Array.length a >= 2 then
+      pretty Format.std_formatter a
+    else
+      ()
 
-  let fNaN_1 = 0x7FF0000000000001L
-  let fNaN_2 = 0x7FF0000000000002L
+  let fNaN_1 = Int64.float_of_bits 0x7FF0000000000001L
+  let fNaN_2 = Int64.float_of_bits 0x7FF0000000000002L
+               
+  let fNaN_3 = Int64.float_of_bits 0xFFF0000000000001L
+  let fNaN_4 = Int64.float_of_bits 0xFFF7FFFFFFFFFFFFL
+                
+  let test (a1, s1) (a2, s2) =
+    if is_included a1 (join a1 a2) then
+      Printf.printf "Success!\n"
+    else begin
+      Printf.printf "Failure in test 1: %s, %s\n" s1 s2;
+      ppa a1; ppa a2; ppa (join a1 a2); assert false
+    end;
+    if is_included a1 (join a2 a1) then
+      Printf.printf "Success!\n"
+    else begin
+      Printf.printf "Failure in test 2: %s, %s\n" s1 s2;
+      ppa a1; ppa a2; ppa (join a1 a2); assert false
+    end
 
-  let fNaN_3 = 0xFFF0000000000001L
-  let fNaN_4 = 0xFFF7FFFFFFFFFFFFL
+  let monte_carlo_test_2 a1 a2 =
+    test a1 a2;
+    test a2 a2
+
+  let commute a1 a2 =
+    let j1, j2 = join a1 a2, join a2 a1 in
+    assert (is_included j1 j2 && is_included j2 j1)
+
+  let monte_carlo_test_3 a1 a2 a3 =
+    test a1 (join (fst a2) (fst a3), Printf.sprintf "%s+%s" (snd a2) (snd a3));
+    test a2 (join (fst a1) (fst a3), Printf.sprintf "%s+%s" (snd a1) (snd a3));
+    test a3 (join (fst a1) (fst a2), Printf.sprintf "%s+%s" (snd a1) (snd a2))
+
+  let produce_mc_tests a () =
+    let a = Array.of_list a in
+    let e = Array.length a - 1 in
+    for i = 0 to e do
+      for j = 0 to e do
+        monte_carlo_test_2 a.(i) a.(j)
+      done
+    done;
+    for i = 0 to e do
+      for j = 0 to e do
+        for k = 0 to e do
+          monte_carlo_test_3 a.(i) a.(j) a.(k)
+        done
+      done
+    done
+
 
   let a_neg_1 =
     let h = Header.(set_flag bottom negative_normalish) in
     let a = Header.allocate_abstract_float h in
     set_neg_lower a (-5.0);
     set_neg_upper a (-1.0);
-    a
+    a, "a_neg_1"
 
   let a_neg_2 =
     let h = Header.(set_flag bottom negative_normalish) in
     let a = Header.allocate_abstract_float h in
     set_neg_lower a (-7.0);
     set_neg_upper a (-2.0);
-    a
+    a, "a_neg_2"
 
   let a_pos_1 =
     let h = Header.(set_flag bottom positive_normalish) in
     let a = Header.allocate_abstract_float h in
     set_pos_lower a (2.0);
     set_pos_upper a (5.0);
-    a
+    a, "a_pos_1"
 
   let a_pos_2 =
     let h = Header.(set_flag bottom positive_normalish) in
     let a = Header.allocate_abstract_float h in
     set_pos_lower a (3.0);
     set_pos_upper a (7.0);
-    a
+    a, "a_pos_2"
 
   let a_neg_pos =
     let h = Header.(set_flag bottom positive_normalish) in
@@ -1097,25 +1125,46 @@ module Test = struct
     set_neg_upper a (-2.0);
     set_pos_lower a (1.0);
     set_pos_upper a (11.0);
-    a
+    a, "a_neg_pos"
 
-  let test1 () =
-    ppa (join a_neg_1 a_neg_2)
+  let a_NaN_1 =
+    [|fNaN_1|], "a_NaN_1"
 
-  let test2 () =
-    ppa (join a_neg_pos a_pos_2)
+  let a_NaN_2 =
+    [|fNaN_2|], "a_NaN_2"
 
-  let test_include_1 () =
-    assert (is_included a_pos_1 (join a_pos_1 a_pos_2));
-    assert (is_included a_pos_2 (join a_pos_1 a_pos_2));
-    assert (is_included a_neg_1 (join a_neg_1 a_pos_2));
-    assert (is_included a_neg_1 (join a_neg_1 a_neg_2));
-    assert (is_included a_neg_2 (join a_neg_1 a_neg_2));
-    assert (is_included a_neg_2 (join a_pos_1 a_neg_2))
+  let pinf, ninf, pzero, nzero =
+    ([|infinity|], "positive infinity"),
+    ([|(-.infinity)|], "negative infinity"),
+    ([|+0.0|], "positive zero"),
+    ([|-0.0|], "negative zero")
+
+  let a_all_NaN =
+    let h = Header.(set_flag bottom all_NaNs) in
+    Header.allocate_abstract_float h, "a_all_NaN"
+
+  let aa =
+    [a_neg_1; a_neg_2; a_pos_1; a_pos_2;
+     a_neg_pos; a_NaN_1; a_NaN_2; a_all_NaN;
+     pinf; ninf; pzero; nzero]
+
+  let test_join () =
+    produce_mc_tests aa ()
+
+  let test_commute () =
+    let a = Array.of_list aa in
+    let e = Array.length a - 1 in
+    for i = 0 to e - 1 do
+      for j = i + 1 to e do
+        commute (fst a.(i)) (fst a.(j))
+      done
+    done
 
 end
 
-let () = Test.test_include_1 ()
+let () =
+  Test.test_join ();
+  Test.test_commute ()
 
 (*
 let () = TestJoin.test2 ()
