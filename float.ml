@@ -72,6 +72,24 @@ exception Invalid_abstract_float_length of int
 exception Fetal_error_when_allocating_abstract_float
 
 (*
+             ***** UNITY OF REPRESENTATION *****
+
+                        *** Rule 1 ***
+
+       Every abstract float has one and only one representation
+
+  1. Single floats include positive zero, negative zero,
+     positive infinity, negative infinity, NaN value should
+     be represented by a singleton.
+
+  2. Any header is represented by an abstract float of size 2.
+     Although one does not care the second field of the abstract
+     float, it should have the same value as the first field. This
+     guarantees abstract float has unique representation.
+
+*)
+
+(*
 
   *********************************************************************
   *                                                                   *
