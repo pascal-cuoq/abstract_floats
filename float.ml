@@ -346,40 +346,35 @@ end = struct
 
   let pretty fmt a =
     let h = of_abstract_float a in
-    let bottom = is_bottom h in
-    if bottom then
-      Format.fprintf fmt "{ }"
-    else begin
-      Format.fprintf fmt "{";
-      let started = ref false in
-      let comma fmt =
-        if !started then Format.fprintf fmt ",";
-        started := true;
-      in
-      let add fmt sign symb =
-        comma fmt;
-        Format.fprintf fmt sign;
-        Format.fprintf fmt symb
-      in
-      let print_sign i symb =
-        match i land 3 with
-        | 0 -> ()
-        | 1 -> add fmt "-" symb
-        | 2 -> add fmt "+" symb
-        | 3 -> add fmt "±" symb
-        | _ -> assert false
-      in
-      print_sign (h lsr 6) "0";
-      print_sign (h lsr 4) "∞";
-      if get_NaN_part h <> 0
-      then begin
-        comma fmt;
-        Format.fprintf fmt "NaN";
-        if not (test h all_NaNs)
-        then Format.fprintf fmt ":%Lx" (naN_of_abstract_float a)
-      end;
-      Format.fprintf fmt "}";
-    end
+    Format.fprintf fmt "{";
+    let started = ref false in
+    let comma fmt =
+      if !started then Format.fprintf fmt ",";
+      started := true;
+    in
+    let add fmt sign symb =
+      comma fmt;
+      Format.fprintf fmt sign;
+      Format.fprintf fmt symb
+    in
+    let print_sign i symb =
+      match i land 3 with
+      | 0 -> ()
+      | 1 -> add fmt "-" symb
+      | 2 -> add fmt "+" symb
+      | 3 -> add fmt "±" symb
+      | _ -> assert false
+    in
+    print_sign (h lsr 6) "0";
+    print_sign (h lsr 4) "∞";
+    if get_NaN_part h <> 0
+    then begin
+      comma fmt;
+      Format.fprintf fmt "NaN";
+      if not (test h all_NaNs)
+      then Format.fprintf fmt ":%Lx" (naN_of_abstract_float a)
+    end;
+    Format.fprintf fmt "}"
 
   let is_exactly h flag = h = flag
 
@@ -883,31 +878,34 @@ let pretty fmt a =
   match a with
   | [| f |] -> Format.fprintf fmt "{%f}" f
   | _ ->
-    let le = Array.length a in
-    let l3 = le >= 3 in
-    if Header.has_inf_zero_or_NaN a
-    then begin
-      Header.pretty fmt a;
-      if l3 then print_union fmt
-    end;
-    if l3 then
-      let l = ~-. (a.(1)) in
-      let u = a.(2) in
-      if l = u then
-        Format.fprintf fmt "{%f}" l
-      else
-        Format.fprintf fmt "[%f ... %f]" l u;
-      if le = 5
+    if is_bottom a
+    then
+      Format.fprintf fmt "{ }"
+    else
+      let le = Array.length a in
+      let l3 = le >= 3 in
+      if Header.has_inf_zero_or_NaN a
       then begin
-        print_union fmt;
-        let l = ~-. (a.(3)) in
-        let u = a.(4) in
+        Header.pretty fmt a;
+        if l3 then print_union fmt
+      end;
+      if l3 then
+        let l = ~-. (a.(1)) in
+        let u = a.(2) in
         if l = u then
           Format.fprintf fmt "{%f}" l
         else
-          Format.fprintf fmt "[%f ... %f]" l u
-      end;
-    Format.fprintf fmt "\n"
+          Format.fprintf fmt "[%f ... %f]" l u;
+        if le = 5
+        then begin
+          print_union fmt;
+          let l = ~-. (a.(3)) in
+          let u = a.(4) in
+          if l = u then
+            Format.fprintf fmt "{%f}" l
+          else
+            Format.fprintf fmt "[%f ... %f]" l u
+        end
 
 (* *** Set operations *** *)
 (* [compare a1 a2] is the order of [a1] and [a2] *)
