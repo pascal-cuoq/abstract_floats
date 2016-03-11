@@ -201,7 +201,7 @@ module Header : sig
   (** [bottom] is header with no flag on *)
 
   val is_bottom : t -> bool
-  (** [is_bottom t] indicates whether [t] is bottom *)
+  (** [is_bottom t] is [true] if [t] is bottom *)
 
   val pretty: Format.formatter -> abstract_float -> unit
   (** [pretty fmt a] pretty-prints the header of [a] on [fmt] *)
@@ -210,9 +210,11 @@ module Header : sig
   (** [combine t1 t2] is the join of [t1] and [t2] *)
 
   val test : t -> flag -> bool
-  (** [test t f] indicates whether [f] is set in [t] *)
+  (** [test t f] is [true] if [f] is set in [t] *)
 
   val has_inf_zero_or_NaN : abstract_float -> bool
+  (** [has_inf_zero_or_NaN a] is [true] if [a] could contain
+      infinity, zero, or NaN value *)
 
   val set_flag : t -> flag -> t
   (** [set t f] is [t] with flag [f] set *)
@@ -228,10 +230,10 @@ module Header : sig
   (** [set_all_NaNs h] is header [h] with [all_NaNs] flag set *)
 
   val exactly_one_NaN : t -> bool
-  (** [exactly_one_NaN t f] indicates whether [f] contains at least one NaN *)
+  (** [exactly_one_NaN t f] is [true] if [f] contains at least one NaN *)
 
   val is_exactly : t-> flag -> bool
-  (** [is_exactly h f] indicates if [t] has only [f] on *)
+  (** [is_exactly h f] is [true] if [t] has only [f] on *)
 
   val size : t -> int
   (** [size h] is the length of abstract float corresponding to the given
@@ -265,6 +267,10 @@ module Header : sig
   val join : t -> t -> abstract_float
   (** [join h1 h2] is an abstract float with header properly set by
       [Header.combine] *)
+
+  val neg: t -> t
+  (** [neg h] is the header of abstract float with header [h] after negation
+      operation *)
 
   val sqrt: t -> t
   (** [sqrt h] is the header of abstract float with header [h] after square
@@ -537,22 +543,13 @@ end = struct
 end
 
 (*
-If negative_normalish, the negative bounds are always at t.(1) and t.(2)
+  If negative_normalish, the negative bounds are always at t.(1) and t.(2)
 
-If positive_normalish, the positive bounds are always at:
-let l = Array.length t in t.(l-2) and t.(l-1)
+  If positive_normalish, the positive bounds are always at:
+    let l = Array.length t in t.(l-2) and t.(l-1)
 
-Each pair of bounds of a same sign is represented as -lower_bound, upper_bound.
-*)
-
-(** [copy_payload a1 a2] will copy potential payload of [a1] to [a2] *)
-let copy_payload a1 a2 = `Deprecated
-(*
-  assert (Array.length a1 >= 2);
-  assert (Array.length a2 > 2); (* assertion to guarantee UoR *)
-  let potential_payload = Int64.(logand (bits_of_float a1.(0)) payload_mask) in
-  a2.(0) <- Int64.(float_of_bits
-                     (logor (bits_of_float a2.(0)) potential_payload))
+  Each pair of bounds of a same sign is represented
+    as -lower_bound, upper_bound.
 *)
 
 (** [copy_bounds a1 a2] will copy bounds of [a1] to the freshly
@@ -723,7 +720,6 @@ let minus_nineten =
   set_neg_upper r (-9.0);
   r
 
-(* RH: want better naming... *)
 let inject_float f = Array.make 1 f
 
 let inject_interval f1 f2 = assert false (* TODO *)
@@ -743,8 +739,7 @@ let set_header_from_float f h =
   Header.(set_flag h (flag_of_float f))
 
 (** [merge_float a f] is a freshly allocated abstract float, which is
-    of the result of the merge of [f] and [a].
-    TODO: abstract reconstruct.. some ... none *)
+    of the result of the merge of [f] and [a]. *)
 let merge_float a f =
   assert (Array.length a >= 2);
   let h = Header.of_abstract_float a in
@@ -911,7 +906,8 @@ let pretty fmt a =
           Format.fprintf fmt "{%f}" l
         else
           Format.fprintf fmt "[%f ... %f]" l u
-      end
+      end;
+    Format.fprintf fmt "\n"
 
 (* *** Set operations *** *)
 (* [compare a1 a2] is the order of [a1] and [a2] *)
@@ -1081,6 +1077,42 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       end;
       an
 
+let meet a1 a2 = assert false
+
+(* [intersects a1 a2] is true iff there exists a float that is both in [a1]
+   and in [a2]. *)
+let intersects a1 a2 = assert false
+
+(* *** Arithmetic *** *)
+
+(* negate() is a bitstring operation, even on NaNs. (IEEE 754-2008 6.3)
+   and C99 says unary minus uses negate. Indirectly, anyway.
+   @UINT_MIN https://twitter.com/UINT_MIN/status/702199094169604096 *)
+let neg a =
+  match Array.length a with
+  | 1 -> let f = a.(0) in [| -.f |]
+  | 2 | 3 | 5 ->
+    let neg_h = Header.(neg (of_abstract_float a)) in
+    let an =
+      match Header.reconstruct_NaN a with
+      | Some n -> Header.allocate_abstract_float_with_NaN neg_h
+                    (-.(Int64.float_of_bits n))
+      | _ -> Header.allocate_abstract_float neg_h in
+    if Header.(test neg_h positive_normalish) then begin
+      (* [-3, -1] ~> [1, 3]
+         (3, -1) --> (-1, 3) *)
+      set_opp_pos_lower an (get_neg_upper a);
+      set_pos_upper an (get_opp_neg_lower a)
+    end;
+    if Header.(test neg_h negative_normalish) then begin
+       (* [1, 3] ~> [-3, -1]
+         (-1, 3) -> (3, -1) *)
+      set_opp_neg_lower an (get_pos_upper a);
+      set_neg_upper an (get_opp_pos_lower a)
+    end;
+    an
+  | _ -> assert false
+
 module Test = struct
 
   let ppa a =
@@ -1138,7 +1170,6 @@ module Test = struct
         done
       done
     done
-
 
   let a_neg_1 =
     let h = Header.(set_flag bottom negative_normalish) in
@@ -1211,30 +1242,18 @@ module Test = struct
       done
     done
 
+  let test_neg_1 () =
+    ppa (fst a_neg_1);
+    ppa (neg (fst a_neg_1))
+
+  let test_neg_2 () =
+    let a = join (fst a_neg_pos) (fst a_NaN_1) in
+    ppa a; ppa (neg a)
+
 end
 
 let () =
-  Test.test_join ();
-  Test.test_commute ()
-
-(*
-let () = TestJoin.test2 ()
-*)
-
-
-let meet a1 a2 = assert false
-
-(* [intersects a1 a2] is true iff there exists a float that is both in [a1]
-   and in [a2]. *)
-let intersects a1 a2 = assert false
-
-(* *** Arithmetic *** *)
-
-(* negate() is a bitstring operation, even on NaNs. (IEEE 754-2008 6.3)
-   and C99 says unary minus uses negate. Indirectly, anyway.
-   @UINT_MIN https://twitter.com/UINT_MIN/status/702199094169604096 *)
-let neg a =
-  assert false
+  Test.test_neg_2 ()
 
 let abstract_sqrt a =
   if is_singleton a
