@@ -466,7 +466,7 @@ end = struct
     then begin
       Format.printf "Problem with abstract float representation@ [|";
       for i = 0 to l-1 do
-        if i = 0
+        if i = 0 || l = 2
         then Format.printf "0x%016Lx" (Int64.bits_of_float a.(0))
         else Format.printf "%.16e" a.(i);
         if i < l-1
