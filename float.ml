@@ -923,10 +923,12 @@ let normalize_for_mult = normalize_zero_and_inf Header.negative_zero
 (** [inject] creates an abstract float from a header indicating the presence
     of zeroes, infinies and NaNs and two pairs of normalish bounds
     that capture negative values and positive values.
-    Normal bound, not inverted.
-    RH: is the result abstract_float always of size 5?
-    PC: no, [Header.allocate_abstract_float header] allocates it of the
-    right size, and only the bounds that exist are written to it. *)
+    The lower bounds are the mathematical ones (not inverted).
+    This function is convenient for the result of arithmetic operations,
+    because it handles underflows to 0 and overflows to infinities that
+    may have happened in neg_l neg_u pos_l pos_u. On the other hand it
+    assumes that [header] indicates either no NaNs or all NaNs
+    (which is the case for results of arithmetic operations. *)
 let inject header neg_l neg_u pos_l pos_u =
   let no_neg = neg_l > neg_u in
   let header =
