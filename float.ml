@@ -1191,6 +1191,29 @@ let intersects a1 a2 = assert false
 
 (* *** Arithmetic *** *)
 
+(*                   Notes on arithmetic involving NaN
+
+   all arithmetic operations except neg produce all_NaNs, if they produce NaN.
+
+   The reason being that:
+
+   Suppose for arithmetic operation [x + (-y)], [y] is a NaN with value
+   [0xFFFFFFFFFFFFFFFF].
+
+   There are two possible cases:
+
+   1) Strictly following IEEE-754 withouth any optimization, the expression
+      is first evaluated to [x + 0x7FFFFFFFFFFFFFFF]. Then, by IEEE-754,
+      NaN must be returned if present as operand. So, the result is 
+      [0x7FFFFFFFFFFFFFFF]
+   2) Compiler does incorrect optimization. [x + (-y)] is optimized into
+      [x - y]. The result then becomes [0xFFFFFFFFFFFFFFFF], according to
+      IEEE-754.
+
+   These mean our program must return [all_NaNs] to capture all possible
+   NaN values *)
+
+
 (* negate() is a bitstring operation, even on NaNs. (IEEE 754-2008 6.3)
    and C99 says unary minus uses negate. Indirectly, anyway.
    @UINT_MIN https://twitter.com/UINT_MIN/status/702199094169604096 *)
@@ -1387,10 +1410,20 @@ let abstract_sqrt a =
       Header.allocate_abstract_float_na new_h
 
 (* [expand a] returns the non-singleton representation corresponding
-   to a singleton [a].  Never let expanded forms escape outside a
-   short computations!  The representation for a same set of floats
-   should be unique.  The single-float representation is efficient and
-   is all that outside code using the library should see.
+   to a singleton [a].
+
+                 ***********************************
+                 *             WARNING             *
+      **********************************************************
+      *                                                        *
+      *         Never let expanded forms escape outside        *
+      *              a short series of computations            *
+      *                                                        *
+      **********************************************************
+
+   The representation for a same set of floats should be unique by UoR.
+   The single-float representation is efficient and is all that outside
+   code using the library should see.
 *)
 let expand a =
   let a = a.(0) in
@@ -1405,15 +1438,11 @@ let expand a =
       let flag =
         if a < 0.0 then Header.negative_normalish else Header.positive_normalish
       in
-      let r = Header.(allocate_abstract_float (of_flag flag) No_NaN) in (* TODO *)
+      let r = Header.(allocate_abstract_float_na (of_flag flag)) in
       r.(1) <- -. a;
       r.(2) <- a;
       r
 
-(* Notes on NaN arithmetic:
-   all arithmetic operations except - produce any NaN, if they produce NaN.
-   If there is a NaN in operand, then NaN result should be one of the input
-   NaNs *)
 let add_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
   let header2 = Header.of_abstract_float a2 in
