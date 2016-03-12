@@ -1382,7 +1382,7 @@ let abstract_sqrt a =
     then
       assert false
     else
-      Header.(allocate_abstract_float new_h No_NaN) (* TODO *)
+      Header.allocate_abstract_float_na new_h
 
 (* [expand a] returns the non-singleton representation corresponding
    to a singleton [a].  Never let expanded forms escape outside a
