@@ -254,8 +254,13 @@ module Header : sig
       [a] cannot be a singleton floating point number *)
 
   val allocate_abstract_float : t -> nan_result -> abstract_float
-  (** [allocate_abstract_float h] is an abstract float of size indicated by
-      [h], and fields correctly set according to [h] *)
+  (** [allocate_abstract_float h nr] is an abstract float of size indicated by
+      [h], and payload correctly set according to [nr] *)
+
+  val allocate_abstract_float_na : t -> abstract_float
+  (** [allocate_abstract_float_na h] is an abstract float of
+      size indicated by [h] *)
+
 
 (*
   val allocate_abstract_float_with_NaN : t -> float -> abstract_float
@@ -412,6 +417,10 @@ end = struct
     | All_NaN ->
       assert (get_NaN_part h <> 0 && not (exactly_one_NaN h));
       Array.make (size h) (Int64.float_of_bits (Int64.of_int (h lsl 52)))
+
+  let allocate_abstract_float_na h =
+    assert (test h all_NaNs || (not (test h at_least_one_NaN)));
+    Array.make (size h) (Int64.float_of_bits (Int64.of_int (h lsl 52)))
 
 (*
   let allocate_abstract_float_with_NaN h f =
@@ -950,7 +959,7 @@ let inject header neg_l neg_u pos_l pos_u =
         then abstract_neg_infinity
         else
           (* Allocate result: *)
-          let r = Header.allocate_abstract_float header Header.No_NaN in
+          let r = Header.allocate_abstract_float_na header in
           if not no_neg
           then set_neg r neg_l neg_u;
           if not no_pos
@@ -1112,7 +1121,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       | _, _, _, _ -> begin
         let h = set_header_from_float f1 Header.bottom in
         let h = set_header_from_float f2 h in
-        let a = Header.allocate_abstract_float h Header.No_NaN in
+        let a = Header.allocate_abstract_float_na h in
         let s = Array.length a in
         if s > 2 then begin
           match classify_float f1, classify_float f2 with
@@ -1144,13 +1153,11 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
         match reconstruct_NaN a1, reconstruct_NaN a2 with
         | One_NaN n1, One_NaN n2 ->
           if n1 <> n2 then
-            allocate_abstract_float (set_all_NaNs hn) All_NaN
+            allocate_abstract_float_na (set_all_NaNs hn)
           else
             allocate_abstract_float hn (One_NaN n1)
-        | All_NaN, _ | _, All_NaN ->
-          (allocate_abstract_float hn All_NaN)
-        | No_NaN, No_NaN ->
-          (allocate_abstract_float hn No_NaN)
+        | All_NaN, _ | _, All_NaN | No_NaN, No_NaN ->
+          allocate_abstract_float_na hn
         | No_NaN, r | r, No_NaN ->
           (allocate_abstract_float hn r) in
       begin
@@ -1194,7 +1201,7 @@ let neg a =
       match Header.reconstruct_NaN a with
       | Header.One_NaN n ->
           Header.(allocate_abstract_float neg_h (One_NaN (Int64.neg n)))
-      | r -> Header.allocate_abstract_float neg_h r in
+      | _ -> Header.allocate_abstract_float_na neg_h in
     if Header.(test neg_h positive_normalish) then begin
       (* [-3, -1] ~> [1, 3]
          (3, -1) --> (-1, 3) *)
@@ -1276,28 +1283,28 @@ module Test = struct
 
   let a_neg_1 =
     let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.(allocate_abstract_float h No_NaN) in
+    let a = Header.allocate_abstract_float_na h in
     set_neg_lower a (-5.0);
     set_neg_upper a (-1.0);
     a, "a_neg_1"
 
   let a_neg_2 =
     let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.(allocate_abstract_float h No_NaN) in
+    let a = Header.allocate_abstract_float_na h in
     set_neg_lower a (-7.0);
     set_neg_upper a (-2.0);
     a, "a_neg_2"
 
   let a_pos_1 =
     let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.(allocate_abstract_float h No_NaN) in
+    let a = Header.allocate_abstract_float_na h in
     set_pos_lower a (2.0);
     set_pos_upper a (5.0);
     a, "a_pos_1"
 
   let a_pos_2 =
     let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.(allocate_abstract_float h No_NaN) in
+    let a = Header.allocate_abstract_float_na h in
     set_pos_lower a (3.0);
     set_pos_upper a (7.0);
     a, "a_pos_2"
@@ -1305,7 +1312,7 @@ module Test = struct
   let a_neg_pos =
     let h = Header.(set_flag bottom positive_normalish) in
     let h = Header.(set_flag h negative_normalish) in
-    let a = Header.(allocate_abstract_float h No_NaN) in
+    let a = Header.allocate_abstract_float_na h in
     set_neg_lower a (-7.0);
     set_neg_upper a (-2.0);
     set_pos_lower a (1.0);
