@@ -439,7 +439,11 @@ end = struct
         | 2 | 3 | 5 ->
           let h = of_abstract_float a in
           let a0 = Int64.bits_of_float a.(0) in
-          if (not (exactly_one_NaN h)) && (Int64.logand a0 payload_mask) <> 0L
+          let n = get_NaN_part h in
+          if (n <> at_least_one_NaN) && (Int64.logand a0 payload_mask) <> 0L
+          then raise Err;
+          if n <> at_least_one_NaN && n <> 0 &&
+            n <> at_least_one_NaN + all_NaNs
           then raise Err;
           if l <> size h then raise Err;
           if l = 2
@@ -467,7 +471,7 @@ end = struct
       Format.printf "Problem with abstract float representation@ [|";
       for i = 0 to l-1 do
         if i = 0 || l = 2
-        then Format.printf "0x%016Lx" (Int64.bits_of_float a.(0))
+        then Format.printf "0x%016Lx" (Int64.bits_of_float a.(i))
         else Format.printf "%.16e" a.(i);
         if i < l-1
         then Format.printf ","
