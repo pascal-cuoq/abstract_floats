@@ -1519,17 +1519,40 @@ let sub = binop (fun r a1 a2 -> r.(0) <- a1.(0) -. a2.(0)) sub_expanded
 let mult_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
   let header2 = Header.of_abstract_float a2 in
+  let p1 = Header.(test header1 positive_normalish) in
+  let p2 = Header.(test header2 positive_normalish) in
+  let n1 = Header.(test header1 negative_normalish) in
+  let n2 = Header.(test header2 negative_normalish) in
   let header = Header.mult header1 header2 in
-  let f1u, f1oppl = get_finite_upper a1, get_opp_finite_lower a1 in
-  let f2u, f2oppl = get_finite_upper a2, get_opp_finite_lower a2 in
-  let f1nu, f1_opp_pl = get_neg_upper a1, get_opp_pos_lower a1 in
-  let f2nu, f2_opp_pl = get_neg_upper a2, get_opp_pos_lower a2 in
-  let opp_neg_l = max (f1oppl *. f2u) (f2oppl *. f1u) in
-  let to_neg f = if is_neg f then f else (-.f) in
-  let neg_u = max (to_neg (f2nu *. f1_opp_pl)) (to_neg (f1nu *. f2_opp_pl)) in
-  let opp_pos_l = max (to_neg (f1nu *. f2nu))
-      (to_neg (f1_opp_pl *. f2_opp_pl)) in
-  let pos_u = max (f1u *. f2u) (f1oppl *. f2oppl) in
+  let f1_nu, f1_opp_nl = get_neg_upper a1, get_opp_neg_lower a1 in
+  let f1_pu, f1_opp_pl = get_pos_upper a1, get_opp_pos_lower a1 in
+  let f2_nu, f2_opp_nl = get_neg_upper a2, get_opp_neg_lower a2 in
+  let f2_pu, f2_opp_pl = get_pos_upper a2, get_opp_pos_lower a2 in
+  let opp_neg_l, neg_u  =
+    if p1 && n2
+    then (f1_pu *. f2_opp_nl), ((-. f1_opp_pl) *. f2_nu)
+    else 0., neg_infinity
+  in
+  let opp_neg_l, neg_u  =
+    if n1 && p2
+    then
+      max opp_neg_l (f2_pu *. f1_opp_nl),
+      max neg_u ((-. f2_opp_pl) *. f1_nu)
+    else opp_neg_l, neg_u
+  in
+  let opp_pos_l, pos_u =
+    if p1 && p2
+    then (-. f1_opp_pl) *. f2_opp_pl, f1_pu *. f2_pu
+    else neg_infinity, 0.
+  in
+  let opp_pos_l, pos_u =
+    if n1 && n2
+    then
+      max opp_pos_l ((-. f1_nu) *. f2_nu),
+      max pos_u (f1_opp_nl *. f2_opp_nl)
+    else
+      opp_pos_l, pos_u
+  in
   (* First, normalize. What may not look like a singleton before normalization
      may turn out to be one afterwards: *)
   let header, neg_l, neg_u, pos_l, pos_u =
@@ -1544,7 +1567,7 @@ let mult = binop (fun r a1 a2 -> r.(0) <- a1.(0) *. a2.(0)) mult_expanded
 module TestMult = struct
 
   let ppa a =
-    pretty Format.std_formatter a
+    Format.printf "%a\n" pretty a
 
   (* [-7, -2] u [3, 5] *)
   let a_1 =
