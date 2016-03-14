@@ -5,20 +5,19 @@ let (==) = `Use_phys_equal
 type abstract_float = float array
 
 (*
-  type [abstract_float] is represented using an array of (unboxed) floats.
+  The type [abstract_float] is represented using an array of (unboxed) floats.
 
-  array [t] with length 1:
+  Array [t] with length 1:
     a single floating-point number
     (can be NaN, +inf, -inf, or a finite value)
 
-  array [t] with length >=2:
+  Array [t] with length >=2:
     header + bounds. the first field is header. the rest of fields are bounds.
     the length of t can only be 2, 3 or 5.
 
     length of 2:
       only intended to distinguish a header from a single
-      floating-point number. this means such array [a] has the
-      field a.(1) containing garbage data we don't care.
+      floating-point number. a.(1) repeats a.(0).
 
     length of 5:
       the FP number could be both pos normalish and neg
@@ -27,9 +26,9 @@ type abstract_float = float array
 
     length of 3:
       the fp number could be either pos normalish or neg normalish,
-       rest two fields indicating one pair of bounds.
+       the fields .(1) and .(2) provide the bounds.
 
-  the header (found in t.(0)) can indicate:
+  The header (found in t.(0)) can indicate:
 
     at least one of the NaN values present
     all NaN values present
@@ -40,7 +39,7 @@ type abstract_float = float array
     -0.0 present
     +0.0 present
 
-  vocabulary:
+  Vocabulary:
 
   - normalish means the intervals of normal (or subnormal) values
   - finite means the normalish and zero components of the representation
@@ -85,9 +84,9 @@ exception Fetal_error_when_allocating_abstract_float
      be represented by a singleton.
 
   2. Any header is represented by an abstract float of size 2.
-     Although one does not care the second field of the abstract
-     float, it should have the same value as the first field. This
-     guarantees abstract float has unique representation.
+     The second field of the abstract
+     float should have the same value as the first field. This
+     guarantees this abstract float has a unique representation.
 
 *)
 
@@ -155,7 +154,8 @@ exception Fetal_error_when_allocating_abstract_float
 
   Notes:
    1. the NaN payload is a NaN's significand and sign bit. This is
-      required only when [at_least_one_NaN] flag is set in [Header.t]
+      required only when [at_least_one_NaN] flag is set
+      and [all_NaNs] is unset in [Header.t]
 
 *)
 
@@ -172,43 +172,32 @@ module Header : sig
   (** abstract flag indicating property of abstract float *)
 
   val at_least_one_NaN : flag
-  (** [at_least_one_NaN] is flag indicating at least one of NaN values
-      is present, either quiet NaN, or signalling NaN.
+  (** [at_least_one_NaN] indicates at least one of NaN value
+      is present.
       When this flag is on, payload should be set *)
 
   val all_NaNs : flag
-  (** [at_least_one_NaN] is flag indicating at least one of NaN values
-      is present, either quiet NaN, or signalling NaN *)
 
   val negative_normalish : flag
-  (** [negative_normalish] is flag indicating floating-number could be in
-      negative normalish range *)
+  (** [negative_normalish] indicates some negative normalish
+      values are present *)
 
   val positive_normalish : flag
-  (** [positive_normalish] is flag indicating floating-number could be in
+  (** [positive_normalish] indicates some positive normalish
       positive normalish range *)
 
   val negative_inf : flag
-  (** [negative_inf] is flag indicating floating-number could be
-      negative infinity *)
+  (** [negative_inf] indicates -inf is present *)
 
   val positive_inf : flag
-  (** [positive_inf] is flag indicating floating-number could be
-      positive infinity *)
 
   val negative_zero : flag
-  (** [negative_zero] is flag indicating floating-number could be in
-      negative zero: -0.0 *)
 
   val positive_zero : flag
-  (** [positive_zero] is flag indicating floating-number could be in
-      positive zero: +0.0 *)
 
   val bottom : t
-  (** [bottom] is header with no flag on *)
 
   val is_bottom : t -> bool
-  (** [is_bottom t] is [true] if [t] is bottom *)
 
   val pretty: Format.formatter -> abstract_float -> unit
   (** [pretty fmt a] pretty-prints the header of [a] on [fmt] *)
@@ -220,21 +209,23 @@ module Header : sig
   (** [test t f] is [true] if [f] is set in [t] *)
 
   val has_inf_zero_or_NaN : abstract_float -> bool
-  (** [has_inf_zero_or_NaN a] is [true] if [a] could contain
-      infinity, zero, or NaN value *)
+  (** [has_inf_zero_or_NaN a] is [true] if [a] contains
+      some infinity, some zero, or a NaN value *)
+
+  val has_normalish : t -> bool
+  (** [has_normalish h] is [true] if [h] contains normalish values *)
 
   val set_flag : t -> flag -> t
   (** [set t f] is [t] with flag [f] set *)
 
   val flag_of_float : float -> flag
-  (** [flag_of_float f] is flag that could be set by [f].
-      [flag_of_float nan] is [at_least_one_NaN] *)
+  (** [flag_of_float f] is flag that would be set to indicate the presence
+      of [f]. [flag_of_float nan] is [at_least_one_NaN] *)
 
   val of_flag : flag -> t
   (** [of_flag f] is a header with flag [t] set *)
 
   val set_all_NaNs : t -> t
-  (** [set_all_NaNs h] is header [h] with [all_NaNs] flag set *)
 
   val exactly_one_NaN : t -> bool
   (** [exactly_one_NaN t f] is [true] if [f] contains at least one NaN *)
@@ -244,22 +235,24 @@ module Header : sig
 
   val size : t -> int
   (** [size h] is the length of abstract float corresponding to the given
-      header. Note that the header alone is not enough to decide that the
-      representation should be a single float. Hence this function always
-      returns at least 2. *)
+      header. Note that the header alone is not always sufficient information
+      to decide that the representation should be a single float.
+      Hence this function always returns at least 2. *)
 
   val of_abstract_float : abstract_float -> t
   (** [of_abstract_float a] is the header of the abstract float [a].
        Note: the abstract float [a] has to have size >= 2. In other words,
       [a] cannot be a singleton floating point number *)
 
-  val allocate_abstract_float : t -> nan_result -> abstract_float
-  (** [allocate_abstract_float h nr] is an abstract float of size indicated by
-      [h], and payload correctly set according to [nr] *)
+  val allocate_abstract_float_with_NaN : t -> nan_result -> abstract_float
+  (** [allocate_abstract_float h nr] allocates an abstract float of size
+      indicated by [h], with payload set according to [nr], and
+      normalish fields, if any, uninitialized. *)
 
-  val allocate_abstract_float_na : t -> abstract_float
-  (** [allocate_abstract_float_na h] is an abstract float of
-      size indicated by [h] *)
+  val allocate_abstract_float : t -> abstract_float
+  (** [allocate_abstract_float h] allocates an abstract float of
+      size indicated by [h], of which the normalish fields, if any,
+      are uninitialized. *)
 
 
 (*
@@ -278,32 +271,20 @@ module Header : sig
   (** [assert (check a);] stops execution if a is ill-formed. *)
 
   val is_header_included : abstract_float -> abstract_float -> bool
-  (** [is_header_included a1 a2] is true if [a2]'s header has all the
-      information [a1]'s header has *)
+  (** [is_header_included a1 a2] is true if the values indicated by [a1]'s
+      header are present in [a2]'s header. *)
 
   val neg: t -> t
-  (** [neg h] is the header of abstract float with header [h] after negation
-      operation *)
 
   val sqrt: t -> t
-  (** [sqrt h] is the header of abstract float with header [h] after square
-      root operation *)
 
   val add: t -> t -> t
-  (** [add h1 h2] is the header of the result abstract float of addition
-      arithmetic operation of two abstract floats of headers [h1] and [h2] *)
 
   val sub: t -> t -> t
-  (** [sub h1 h2] is the header of the result abstract float of subtraction
-        arithmetic operation of two abstract floats of headers [h1] and [h2] *)
 
   val mult: t -> t -> t
-  (** [mult h1 h2] is the header of the result abstract float of multiplication
-        arithmetic operation of two abstract floats of headers [h1] and [h2] *)
 
   val div: t -> t -> t
-  (** [div h1 h2] is the header of the result abstract float of division
-        arithmetic operation of two abstract floats of headers [h1] and [h2] *)
 
 end = struct
   type t = int
@@ -398,13 +379,15 @@ end = struct
 
   let normalish_mask = negative_normalish + positive_normalish
 
+  let has_normalish h = (h land normalish_mask) <> 0
+
   let size h =
     let posneg = h land normalish_mask in
     if posneg = normalish_mask then 5
     else if posneg <> 0 then 3
     else 2
 
-  let allocate_abstract_float h nr =
+  let allocate_abstract_float_with_NaN h nr =
     match nr with
     | No_NaN ->
       assert (get_NaN_part h = 0);
@@ -418,7 +401,7 @@ end = struct
       assert (get_NaN_part h <> 0 && not (exactly_one_NaN h));
       Array.make (size h) (Int64.float_of_bits (Int64.of_int (h lsl 52)))
 
-  let allocate_abstract_float_na h =
+  let allocate_abstract_float h =
     assert (test h all_NaNs || (not (test h at_least_one_NaN)));
     Array.make (size h) (Int64.float_of_bits (Int64.of_int (h lsl 52)))
 
@@ -788,7 +771,7 @@ let insert_all_bounds a1 a2 : unit =
 
 let onetwo =
   let header = Header.(of_flag positive_normalish) in
-  let r = Header.(allocate_abstract_float header No_NaN) in
+  let r = Header.(allocate_abstract_float header) in
   set_pos_lower r 1.0;
   set_pos_upper r 2.0;
   assert (Header.check r);
@@ -796,7 +779,7 @@ let onetwo =
 
 let minus_nineten =
   let header = Header.(of_flag negative_normalish) in
-  let r = Header.(allocate_abstract_float header No_NaN) in
+  let r = Header.(allocate_abstract_float header) in
   set_neg_lower r (-10.0);
   set_neg_upper r (-9.0);
   assert (Header.check r);
@@ -813,8 +796,8 @@ let neg_zero = inject_float (-0.0)
 let abstract_infinity = inject_float infinity
 let abstract_neg_infinity = inject_float neg_infinity
 let abstract_all_NaNs =
-  Header.(allocate_abstract_float (set_all_NaNs bottom) All_NaN)
-let bottom = Header.(allocate_abstract_float bottom No_NaN)
+  Header.(allocate_abstract_float (set_all_NaNs bottom))
+let bottom = Header.(allocate_abstract_float bottom)
 
 let () =
   assert (Header.check zero);
@@ -845,7 +828,8 @@ let merge_float a f =
     then a
     else begin
       let a' =
-        Header.allocate_abstract_float h_new (Header.reconstruct_NaN a) in
+        Header.allocate_abstract_float_with_NaN h_new (Header.reconstruct_NaN a)
+      in
       copy_bounds a a'; a'
     end
   | FP_nan ->
@@ -858,13 +842,13 @@ let merge_float a f =
       | Header.One_NaN n ->
         if n = Int64.bits_of_float f then a else begin
           let h = Header.set_all_NaNs h in
-          let anew = Header.allocate_abstract_float h Header.All_NaN in
+          let anew = Header.allocate_abstract_float h in
           copy_bounds a anew; anew
         end
       | Header.No_NaN ->
         let h = Header.(set_flag h at_least_one_NaN) in
         let anew =
-          Header.allocate_abstract_float h
+          Header.allocate_abstract_float_with_NaN h
             (Header.One_NaN (Int64.bits_of_float f)) in
         copy_bounds a anew; anew
     end
@@ -875,7 +859,7 @@ let merge_float a f =
       let h = Header.(set_flag h (flag_of_float f)) in
       assert (Header.size h = 3 || Header.size h = 5);
       let a' =
-        Header.allocate_abstract_float h
+        Header.allocate_abstract_float_with_NaN h
           (Header.reconstruct_NaN a) in
       copy_bounds a a';
       insert_float_in_bounds a' f;
@@ -961,7 +945,7 @@ let inject header neg_l neg_u pos_l pos_u =
         then abstract_neg_infinity
         else
           (* Allocate result: *)
-          let r = Header.allocate_abstract_float_na header in
+          let r = Header.allocate_abstract_float header in
           if not no_neg
           then set_neg r neg_l neg_u;
           if not no_pos
@@ -1107,7 +1091,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       | FP_nan, _, theNaN, nonNaN | _, FP_nan, nonNaN, theNaN ->
         let h = Header.(of_flag at_least_one_NaN) in
         let h = set_header_from_float nonNaN h in
-        let a = Header.allocate_abstract_float h
+        let a = Header.allocate_abstract_float_with_NaN h
             (Header.One_NaN (Int64.bits_of_float theNaN)) in
         if Header.size h <> 2
         then begin
@@ -1123,7 +1107,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       | _, _, _, _ -> begin
         let h = set_header_from_float f1 Header.bottom in
         let h = set_header_from_float f2 h in
-        let a = Header.allocate_abstract_float_na h in
+        let a = Header.allocate_abstract_float h in
         let s = Array.length a in
         if s > 2 then begin
           match classify_float f1, classify_float f2 with
@@ -1155,13 +1139,13 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
         match reconstruct_NaN a1, reconstruct_NaN a2 with
         | One_NaN n1, One_NaN n2 ->
           if n1 <> n2 then
-            allocate_abstract_float_na (set_all_NaNs hn)
+            allocate_abstract_float (set_all_NaNs hn)
           else
-            allocate_abstract_float hn (One_NaN n1)
+            allocate_abstract_float_with_NaN hn (One_NaN n1)
         | All_NaN, _ | _, All_NaN | No_NaN, No_NaN ->
-          allocate_abstract_float_na hn
+          allocate_abstract_float hn
         | No_NaN, r | r, No_NaN ->
-          (allocate_abstract_float hn r) in
+          (allocate_abstract_float_with_NaN hn r) in
       begin
       (* insert bounds from [a1] and [a2] to [an] *)
       match Array.length a1, a1, Array.length a2, a2, Array.length an with
@@ -1225,8 +1209,9 @@ let neg a =
     let an =
       match Header.reconstruct_NaN a with
       | Header.One_NaN n ->
-          Header.(allocate_abstract_float neg_h (One_NaN (Int64.neg n)))
-      | _ -> Header.allocate_abstract_float_na neg_h in
+          Header.(allocate_abstract_float_with_NaN
+                    neg_h (One_NaN (Int64.neg n)))
+      | _ -> Header.allocate_abstract_float neg_h in
     if Header.(test neg_h positive_normalish) then begin
       (* [-3, -1] ~> [1, 3]
          (3, -1) --> (-1, 3) *)
@@ -1308,28 +1293,28 @@ module Test = struct
 
   let a_neg_1 =
     let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.allocate_abstract_float_na h in
+    let a = Header.allocate_abstract_float h in
     set_neg_lower a (-5.0);
     set_neg_upper a (-1.0);
     a, "a_neg_1"
 
   let a_neg_2 =
     let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.allocate_abstract_float_na h in
+    let a = Header.allocate_abstract_float h in
     set_neg_lower a (-7.0);
     set_neg_upper a (-2.0);
     a, "a_neg_2"
 
   let a_pos_1 =
     let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.allocate_abstract_float_na h in
+    let a = Header.allocate_abstract_float h in
     set_pos_lower a (2.0);
     set_pos_upper a (5.0);
     a, "a_pos_1"
 
   let a_pos_2 =
     let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.allocate_abstract_float_na h in
+    let a = Header.allocate_abstract_float h in
     set_pos_lower a (3.0);
     set_pos_upper a (7.0);
     a, "a_pos_2"
@@ -1337,7 +1322,7 @@ module Test = struct
   let a_neg_pos =
     let h = Header.(set_flag bottom positive_normalish) in
     let h = Header.(set_flag h negative_normalish) in
-    let a = Header.allocate_abstract_float_na h in
+    let a = Header.allocate_abstract_float h in
     set_neg_lower a (-7.0);
     set_neg_upper a (-2.0);
     set_pos_lower a (1.0);
@@ -1409,7 +1394,7 @@ let abstract_sqrt a =
     then
       assert false
     else
-      Header.allocate_abstract_float_na new_h
+      Header.allocate_abstract_float new_h
 
 (* [expand a] returns the non-singleton representation corresponding
    to a singleton [a].
@@ -1440,7 +1425,7 @@ let expand a =
       let flag =
         if a < 0.0 then Header.negative_normalish else Header.positive_normalish
       in
-      let r = Header.(allocate_abstract_float_na (of_flag flag)) in
+      let r = Header.(allocate_abstract_float (of_flag flag)) in
       r.(1) <- -. a;
       r.(2) <- a;
       r
@@ -1524,41 +1509,45 @@ let mult_expanded a1 a2 =
   let n1 = Header.(test header1 negative_normalish) in
   let n2 = Header.(test header2 negative_normalish) in
   let header = Header.mult header1 header2 in
-  let f1_nu, f1_opp_nl = get_neg_upper a1, get_opp_neg_lower a1 in
-  let f1_pu, f1_opp_pl = get_pos_upper a1, get_opp_pos_lower a1 in
-  let f2_nu, f2_opp_nl = get_neg_upper a2, get_opp_neg_lower a2 in
-  let f2_pu, f2_opp_pl = get_pos_upper a2, get_opp_pos_lower a2 in
-  let opp_neg_l, neg_u  =
-    if p1 && n2
-    then (f1_pu *. f2_opp_nl), ((-. f1_opp_pl) *. f2_nu)
-    else 0., neg_infinity
-  in
-  let opp_neg_l, neg_u  =
-    if n1 && p2
-    then
-      max opp_neg_l (f2_pu *. f1_opp_nl),
-      max neg_u ((-. f2_opp_pl) *. f1_nu)
-    else opp_neg_l, neg_u
-  in
-  let opp_pos_l, pos_u =
-    if p1 && p2
-    then (-. f1_opp_pl) *. f2_opp_pl, f1_pu *. f2_pu
-    else neg_infinity, 0.
-  in
-  let opp_pos_l, pos_u =
-    if n1 && n2
-    then
-      max opp_pos_l ((-. f1_nu) *. f2_nu),
-      max pos_u (f1_opp_nl *. f2_opp_nl)
-    else
-      opp_pos_l, pos_u
-  in
+  if (p1 || n1) && (p2 || n2)
+  then
+    let f1_nu, f1_opp_nl = get_neg_upper a1, get_opp_neg_lower a1 in
+    let f1_pu, f1_opp_pl = get_pos_upper a1, get_opp_pos_lower a1 in
+    let f2_nu, f2_opp_nl = get_neg_upper a2, get_opp_neg_lower a2 in
+    let f2_pu, f2_opp_pl = get_pos_upper a2, get_opp_pos_lower a2 in
+    let opp_neg_l, neg_u  =
+      if p1 && n2
+      then (f1_pu *. f2_opp_nl), ((-. f1_opp_pl) *. f2_nu)
+      else 0., neg_infinity
+    in
+    let opp_neg_l, neg_u  =
+      if n1 && p2
+      then
+        max opp_neg_l (f2_pu *. f1_opp_nl),
+        max neg_u ((-. f2_opp_pl) *. f1_nu)
+      else opp_neg_l, neg_u
+    in
+    let opp_pos_l, pos_u =
+      if p1 && p2
+      then (-. f1_opp_pl) *. f2_opp_pl, f1_pu *. f2_pu
+      else neg_infinity, 0.
+    in
+    let opp_pos_l, pos_u =
+      if n1 && n2
+      then
+        max opp_pos_l ((-. f1_nu) *. f2_nu),
+        max pos_u (f1_opp_nl *. f2_opp_nl)
+      else
+        opp_pos_l, pos_u
+    in
   (* First, normalize. What may not look like a singleton before normalization
      may turn out to be one afterwards: *)
-  let header, neg_l, neg_u, pos_l, pos_u =
-    normalize_for_mult header (-. opp_neg_l) neg_u (-. opp_pos_l) pos_u
-  in
-  inject header neg_l neg_u pos_l pos_u
+    let header, neg_l, neg_u, pos_l, pos_u =
+      normalize_for_mult header (-. opp_neg_l) neg_u (-. opp_pos_l) pos_u
+    in
+    inject header neg_l neg_u pos_l pos_u
+  else
+    Header.allocate_abstract_float header
 
 (** [mult a1 a2] returns the set of values that can be taken by multiplying
     a value from [a1] with a value from [a2]. *)
@@ -1573,7 +1562,7 @@ module TestMult = struct
   let a_1 =
     let h = Header.(set_flag bottom negative_normalish) in
     let h = Header.(set_flag h positive_normalish) in
-    let a = Header.allocate_abstract_float_na h in
+    let a = Header.allocate_abstract_float h in
     set_neg_lower a (-7.0);
     set_neg_upper a (-2.0);
     set_pos_lower a (3.0);
@@ -1584,7 +1573,7 @@ module TestMult = struct
   let a_2 =
     let h = Header.(set_flag bottom positive_normalish) in
     let h = Header.(set_flag h negative_normalish) in
-    let a = Header.allocate_abstract_float_na h in
+    let a = Header.allocate_abstract_float h in
     set_neg_lower a (-5.0);
     set_neg_upper a (-3.0);
     set_pos_lower a (1.0);
@@ -1594,7 +1583,7 @@ module TestMult = struct
   (* [2, 5] *)
   let a_pos_1 =
     let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.allocate_abstract_float_na h in
+    let a = Header.allocate_abstract_float h in
     set_pos_lower a (2.0);
     set_pos_upper a (5.0);
     a
@@ -1602,7 +1591,7 @@ module TestMult = struct
   (* [3, 7] *)
   let a_pos_2 =
     let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.allocate_abstract_float_na h in
+    let a = Header.allocate_abstract_float h in
     set_pos_lower a (3.0);
     set_pos_upper a (7.0);
     a
@@ -1610,7 +1599,7 @@ module TestMult = struct
   (* [-5, -1] *)
   let a_neg_1 =
     let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.allocate_abstract_float_na h in
+    let a = Header.allocate_abstract_float h in
     set_neg_lower a (-5.0);
     set_neg_upper a (-1.0);
     a
@@ -1618,7 +1607,7 @@ module TestMult = struct
   (* [-7, -2] *)
   let a_neg_2 =
     let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.allocate_abstract_float_na h in
+    let a = Header.allocate_abstract_float h in
     set_neg_lower a (-7.0);
     set_neg_upper a (-2.0);
     a
