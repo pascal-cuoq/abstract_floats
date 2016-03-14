@@ -1387,10 +1387,12 @@ module Test = struct
 
 end
 
+(*
 let () =
   Test.test_join ();
   Test.test_neg_1 ();
   Test.test_neg_2 ()
+*)
 
 let abstract_sqrt a =
   if is_singleton a
@@ -1452,15 +1454,15 @@ let add_expanded a1 a2 =
      operations need to compute the contributions resulting from the
      (sub)normal parts of the operands.  Usually these contributions are
      (sub)normal intervals, but operations on (sub)normal values can always
-     underflow to zero or overflow to infinity. *)
+     underflow to zero or overflow to infinity.
 
-    (* One constraint: always compute so that if the rounding mode
-       was upwards, then it would make the sets larger.
-       This means computing the positive upper bound as a positive
-       number, as well as the negative lower bound.
-       The positive lower bound and the negative upper bound must
-       be computed as negative numbers, so that if rounding were upwards,
-       they would end up closer to 0, making the sets larger. *)
+     One constraint: always compute so that if the rounding mode
+     was upwards, then it would make the sets larger.
+     This means computing the positive upper bound as a positive
+     number, as well as the negative lower bound.
+     The positive lower bound and the negative upper bound must
+     be computed as negative numbers, so that if rounding were upwards,
+     they would end up closer to 0, making the sets larger. *)
   let opp_neg_l = get_opp_finite_lower a1 +. get_opp_finite_lower a2 in
   let neg_u = -0.001 (* assert false TODO obj_magic *) in
   let opp_pos_l = -0.001 in (* TODO obj_magic *)
@@ -1518,11 +1520,16 @@ let mult_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
   let header2 = Header.of_abstract_float a2 in
   let header = Header.mult header1 header2 in
-  let opp_neg_l = assert false in
-  let neg_u = assert false in
-  let opp_pos_l = assert false in
-  let pos_u = assert false in
-
+  let f1u, f1oppl = get_finite_upper a1, get_opp_finite_lower a1 in
+  let f2u, f2oppl = get_finite_upper a2, get_opp_finite_lower a2 in
+  let f1nu, f1_opp_pl = get_neg_upper a1, get_opp_pos_lower a1 in
+  let f2nu, f2_opp_pl = get_neg_upper a2, get_opp_pos_lower a2 in
+  let opp_neg_l = max (f1oppl *. f2u) (f2oppl *. f1u) in
+  let to_neg f = if is_neg f then f else (-.f) in
+  let neg_u = max (to_neg (f2nu *. f1_opp_pl)) (to_neg (f1nu *. f2_opp_pl)) in
+  let opp_pos_l = max (to_neg (f1nu *. f2nu))
+      (to_neg (f1_opp_pl *. f2_opp_pl)) in
+  let pos_u = max (f1u *. f2u) (f1oppl *. f2oppl) in
   (* First, normalize. What may not look like a singleton before normalization
      may turn out to be one afterwards: *)
   let header, neg_l, neg_u, pos_l, pos_u =
@@ -1533,6 +1540,90 @@ let mult_expanded a1 a2 =
 (** [mult a1 a2] returns the set of values that can be taken by multiplying
     a value from [a1] with a value from [a2]. *)
 let mult = binop (fun r a1 a2 -> r.(0) <- a1.(0) *. a2.(0)) mult_expanded
+
+module TestMult = struct
+
+  let ppa a =
+    pretty Format.std_formatter a
+
+  (* [-7, -2] u [3, 5] *)
+  let a_1 =
+    let h = Header.(set_flag bottom negative_normalish) in
+    let h = Header.(set_flag h positive_normalish) in
+    let a = Header.allocate_abstract_float_na h in
+    set_neg_lower a (-7.0);
+    set_neg_upper a (-2.0);
+    set_pos_lower a (3.0);
+    set_pos_upper a (5.0);
+    a
+
+  (* [-5, -3] u [1, 6] *)
+  let a_2 =
+    let h = Header.(set_flag bottom positive_normalish) in
+    let h = Header.(set_flag h negative_normalish) in
+    let a = Header.allocate_abstract_float_na h in
+    set_neg_lower a (-5.0);
+    set_neg_upper a (-3.0);
+    set_pos_lower a (1.0);
+    set_pos_upper a (6.0);
+    a
+
+  (* [2, 5] *)
+  let a_pos_1 =
+    let h = Header.(set_flag bottom positive_normalish) in
+    let a = Header.allocate_abstract_float_na h in
+    set_pos_lower a (2.0);
+    set_pos_upper a (5.0);
+    a
+
+  (* [3, 7] *)
+  let a_pos_2 =
+    let h = Header.(set_flag bottom positive_normalish) in
+    let a = Header.allocate_abstract_float_na h in
+    set_pos_lower a (3.0);
+    set_pos_upper a (7.0);
+    a
+
+  (* [-5, -1] *)
+  let a_neg_1 =
+    let h = Header.(set_flag bottom negative_normalish) in
+    let a = Header.allocate_abstract_float_na h in
+    set_neg_lower a (-5.0);
+    set_neg_upper a (-1.0);
+    a
+
+  (* [-7, -2] *)
+  let a_neg_2 =
+    let h = Header.(set_flag bottom negative_normalish) in
+    let a = Header.allocate_abstract_float_na h in
+    set_neg_lower a (-7.0);
+    set_neg_upper a (-2.0);
+    a
+
+  (* [-42., -2] * [3., 35.] *)
+  let amult1 = mult a_1 a_2
+
+  (* [-49., -6] * [9., 35.] *)
+  let amult2 = mult a_1 a_pos_2
+
+  (* [6., 35.] *)
+  let amult3 = mult a_pos_1 a_pos_2
+
+  (* [2., 35.] *)
+  let amult4 = mult a_neg_1 a_neg_2
+
+  (* [-35., -4.] *)
+  let amult5 = mult a_pos_1 a_neg_2
+
+
+end
+
+let () =
+  TestMult.(ppa amult1);
+  TestMult.(ppa amult2);
+  TestMult.(ppa amult3);
+  TestMult.(ppa amult4);
+  TestMult.(ppa amult5)
 
 let div_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
