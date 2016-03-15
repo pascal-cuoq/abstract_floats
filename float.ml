@@ -1412,23 +1412,30 @@ let abstract_sqrt a =
    The single-float representation is efficient and is all that outside
    code using the library should see.
 *)
-let expand a =
-  let a = a.(0) in
-  if a = infinity then abstract_infinity
-  else if a = neg_infinity then abstract_neg_infinity
-  else if a <> a then abstract_all_NaNs
-  else
-    let repr = Int64.bits_of_float a in
-    if repr = 0L then zero
-    else if repr = sign_bit then neg_zero
+let expand =
+  let exp_infinity = Header.(allocate_abstract_float (of_flag positive_inf)) in
+  let exp_neg_infinity =
+    Header.(allocate_abstract_float (of_flag negative_inf))
+  in
+  let exp_zero = Header.(allocate_abstract_float (of_flag positive_zero)) in
+  let exp_neg_zero = Header.(allocate_abstract_float (of_flag negative_zero)) in
+  fun a->
+    let a = a.(0) in
+    if a = infinity then exp_infinity
+    else if a = neg_infinity then exp_neg_infinity
+    else if a <> a then abstract_all_NaNs
     else
-      let flag =
-        if a < 0.0 then Header.negative_normalish else Header.positive_normalish
-      in
-      let r = Header.(allocate_abstract_float (of_flag flag)) in
-      r.(1) <- -. a;
-      r.(2) <- a;
-      r
+      let repr = Int64.bits_of_float a in
+      if repr = 0L then exp_zero
+      else if repr = sign_bit then exp_neg_zero
+      else
+        let flag =
+          if a < 0.0 then Header.negative_normalish else Header.positive_normalish
+        in
+        let r = Header.(allocate_abstract_float (of_flag flag)) in
+        r.(1) <- -. a;
+        r.(2) <- a;
+        r
 
 let add_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
