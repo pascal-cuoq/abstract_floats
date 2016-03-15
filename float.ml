@@ -1563,7 +1563,61 @@ let mult_expanded a1 a2 =
     a value from [a1] with a value from [a2]. *)
 let mult = binop (fun r a1 a2 -> r.(0) <- a1.(0) *. a2.(0)) mult_expanded
 
-module TestMult = struct
+
+let div_expanded a1 a2 =
+  let header1 = Header.of_abstract_float a1 in
+  let header2 = Header.of_abstract_float a2 in
+  let p1 = Header.(test header1 positive_normalish) in
+  let p2 = Header.(test header2 positive_normalish) in
+  let n1 = Header.(test header1 negative_normalish) in
+  let n2 = Header.(test header2 negative_normalish) in
+  let header = Header.div header1 header2 in
+  let opp_neg_l, neg_u =
+    if p1 && n2
+    then
+      let f1_pu, f1_opp_pl = get_pos_upper a1, get_opp_pos_lower a1 in
+      let f2_nu, f2_opp_nl = get_neg_upper a2, get_opp_neg_lower a2 in
+      (-. f1_pu /. f2_nu), f1_opp_pl /. f2_opp_nl
+    else
+      0., neg_infinity
+  in
+  let opp_neg_l, neg_u =
+    if n1 && p2
+    then
+      let f1_nu, f1_opp_nl = get_neg_upper a1, get_opp_neg_lower a1 in
+      let f2_pu, f2_opp_pl = get_pos_upper a2, get_opp_pos_lower a2 in
+      max opp_neg_l (-. f1_opp_nl /. f2_opp_pl),
+      max neg_u (f1_nu /. f2_pu)
+    else
+      opp_neg_l, neg_u in
+  let opp_pos_l, pos_u =
+    if p1 && p2
+    then
+      let f1_opp_pl, f1_pu = get_opp_pos_lower a1, get_pos_upper a1 in
+      let f2_opp_pl, f2_pu = get_opp_pos_lower a2, get_pos_upper a2 in
+      (f1_opp_pl /. f2_pu), (-. f1_pu /. f2_opp_pl)
+    else
+      neg_infinity, 0.
+  in
+  let opp_pos_l, pos_u =
+    if n1 && n2
+    then
+      let f1_nu, f1_opp_nl = get_neg_upper a1, get_opp_neg_lower a1 in
+      let f2_nu, f2_opp_nl = get_neg_upper a2, get_opp_neg_lower a2 in
+      max opp_pos_l (f1_nu /. f2_opp_nl),
+      max pos_u (-. f1_opp_nl /. f2_nu)
+    else
+      opp_pos_l, pos_u in
+  let header, neg_l, neg_u, pos_l, pos_u =
+    normalize_for_mult header (-. opp_neg_l) neg_u (-. opp_pos_l) pos_u
+  in
+  inject header neg_l neg_u pos_l pos_u
+
+(** [div a1 a2] returns the set of values that can be taken by dividing
+    a value from [a1] by a value from [a2]. *)
+let div = binop (fun r a1 a2 -> r.(0) <- a1.(0) /. a2.(0)) div_expanded
+
+module TestMultDiv = struct
 
   let ppa a =
     Format.printf "%a\n" pretty a
@@ -1637,35 +1691,31 @@ module TestMult = struct
   (* [-35., -4.] *)
   let amult5 = mult a_pos_1 a_neg_2
 
+  (* [-7., -0.333...] * [0.4, 5.] *)
+  let adiv1 = div a_1 a_2
+
+  let adiv2 = div a_1 a_pos_2
+
+  let adiv3 = div a_pos_1 a_pos_2
+
+  let adiv4 = div a_neg_1 a_neg_2
+
+  let adiv5 = div a_pos_1 a_neg_2
 
 end
 
 let () =
-  TestMult.(ppa amult1);
-  TestMult.(ppa amult2);
-  TestMult.(ppa amult3);
-  TestMult.(ppa amult4);
-  TestMult.(ppa amult5)
+  TestMultDiv.(ppa amult1);
+  TestMultDiv.(ppa amult2);
+  TestMultDiv.(ppa amult3);
+  TestMultDiv.(ppa amult4);
+  TestMultDiv.(ppa amult5);
+  TestMultDiv.(ppa adiv1);
+  TestMultDiv.(ppa adiv2);
+  TestMultDiv.(ppa adiv3);
+  TestMultDiv.(ppa adiv4);
+  TestMultDiv.(ppa adiv5)
 
-let div_expanded a1 a2 =
-  let header1 = Header.of_abstract_float a1 in
-  let header2 = Header.of_abstract_float a2 in
-  let header = Header.div header1 header2 in
-  let opp_neg_l = assert false in
-  let neg_u = assert false in
-  let opp_pos_l = assert false in
-  let pos_u = assert false in
-
-  (* First, normalize. What may not look like a singleton before normalization
-     may turn out to be one afterwards: *)
-  let header, neg_l, neg_u, pos_l, pos_u =
-    normalize_for_mult header (-. opp_neg_l) neg_u (-. opp_pos_l) pos_u
-  in
-  inject header neg_l neg_u pos_l pos_u
-
-(** [div a1 a2] returns the set of values that can be taken by dividing
-    a value from [a1] by a value from [a2]. *)
-let div = binop (fun r a1 a2 -> r.(0) <- a1.(0) /. a2.(0)) div_expanded
 
 (* *** Backwards functions *** *)
 
