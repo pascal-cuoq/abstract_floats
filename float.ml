@@ -1509,45 +1509,48 @@ let mult_expanded a1 a2 =
   let n1 = Header.(test header1 negative_normalish) in
   let n2 = Header.(test header2 negative_normalish) in
   let header = Header.mult header1 header2 in
-  if (p1 || n1) && (p2 || n2)
-  then
-    let f1_nu, f1_opp_nl = get_neg_upper a1, get_opp_neg_lower a1 in
-    let f1_pu, f1_opp_pl = get_pos_upper a1, get_opp_pos_lower a1 in
-    let f2_nu, f2_opp_nl = get_neg_upper a2, get_opp_neg_lower a2 in
-    let f2_pu, f2_opp_pl = get_pos_upper a2, get_opp_pos_lower a2 in
-    let opp_neg_l, neg_u  =
-      if p1 && n2
-      then (f1_pu *. f2_opp_nl), ((-. f1_opp_pl) *. f2_nu)
-      else 0., neg_infinity
-    in
-    let opp_neg_l, neg_u  =
-      if n1 && p2
-      then
-        max opp_neg_l (f2_pu *. f1_opp_nl),
-        max neg_u ((-. f2_opp_pl) *. f1_nu)
-      else opp_neg_l, neg_u
-    in
-    let opp_pos_l, pos_u =
-      if p1 && p2
-      then (-. f1_opp_pl) *. f2_opp_pl, f1_pu *. f2_pu
-      else neg_infinity, 0.
-    in
-    let opp_pos_l, pos_u =
-      if n1 && n2
-      then
-        max opp_pos_l ((-. f1_nu) *. f2_nu),
-        max pos_u (f1_opp_nl *. f2_opp_nl)
-      else
-        opp_pos_l, pos_u
-    in
+  let opp_neg_l, neg_u  =
+    if p1 && n2
+    then
+      let f1_pu, f1_opp_pl = get_pos_upper a1, get_opp_pos_lower a1 in
+      let f2_nu, f2_opp_nl = get_neg_upper a2, get_opp_neg_lower a2 in
+      (f1_pu *. f2_opp_nl), ((-. f1_opp_pl) *. f2_nu)
+    else 0., neg_infinity
+  in
+  let opp_neg_l, neg_u  =
+    if n1 && p2
+    then
+      let f1_nu, f1_opp_nl = get_neg_upper a1, get_opp_neg_lower a1 in
+      let f2_pu, f2_opp_pl = get_pos_upper a2, get_opp_pos_lower a2 in
+      max opp_neg_l (f2_pu *. f1_opp_nl),
+      max neg_u ((-. f2_opp_pl) *. f1_nu)
+    else opp_neg_l, neg_u
+  in
+  let opp_pos_l, pos_u =
+    if p1 && p2
+    then
+      let f1_pu, f1_opp_pl = get_pos_upper a1, get_opp_pos_lower a1 in
+      let f2_pu, f2_opp_pl = get_pos_upper a2, get_opp_pos_lower a2 in
+      (-. f1_opp_pl) *. f2_opp_pl, f1_pu *. f2_pu
+    else neg_infinity, 0.
+  in
+  let opp_pos_l, pos_u =
+    if n1 && n2
+    then
+      let f1_nu, f1_opp_nl = get_neg_upper a1, get_opp_neg_lower a1 in
+      let f2_nu, f2_opp_nl = get_neg_upper a2, get_opp_neg_lower a2 in
+      max opp_pos_l ((-. f1_nu) *. f2_nu),
+      max pos_u (f1_opp_nl *. f2_opp_nl)
+    else
+      opp_pos_l, pos_u
+  in
   (* First, normalize. What may not look like a singleton before normalization
      may turn out to be one afterwards: *)
-    let header, neg_l, neg_u, pos_l, pos_u =
-      normalize_for_mult header (-. opp_neg_l) neg_u (-. opp_pos_l) pos_u
-    in
-    inject header neg_l neg_u pos_l pos_u
-  else
-    Header.allocate_abstract_float header
+  let header, neg_l, neg_u, pos_l, pos_u =
+    normalize_for_mult header (-. opp_neg_l) neg_u (-. opp_pos_l) pos_u
+  in
+  inject header neg_l neg_u pos_l pos_u
+
 
 (** [mult a1 a2] returns the set of values that can be taken by multiplying
     a value from [a1] with a value from [a2]. *)
