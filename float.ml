@@ -958,15 +958,15 @@ let print_bounds fmt a i =
   let l = ~-. (a.(i)) in
   let u = a.(i + 1) in
   if l = u then
-    Format.fprintf fmt "{%f}" l
+    Format.fprintf fmt "{%.16e}" l
   else
-    Format.fprintf fmt "[%f ... %f]" l u
+    Format.fprintf fmt "[%.16e ... %.16e]" l u
 
 (* [pretty fmt a] pretty-prints [a] on [fmt] *)
 let pretty fmt a =
   assert (Header.check a);
   match a with
-  | [| f |] -> Format.fprintf fmt "{%f}" f
+  | [| f |] -> Format.fprintf fmt "{%.16e}" f
   | _ ->
     if is_bottom a
     then
@@ -1437,36 +1437,6 @@ let expand =
         r.(2) <- a;
         r
 
-let add_expanded a1 a2 =
-  let header1 = Header.of_abstract_float a1 in
-  let header2 = Header.of_abstract_float a2 in
-  let header = Header.add header1 header2 in
-  (* After getting the contributions to the result arising from the
-     header bits of the operands, the "expanded" versions of binary
-     operations need to compute the contributions resulting from the
-     (sub)normal parts of the operands.  Usually these contributions are
-     (sub)normal intervals, but operations on (sub)normal values can always
-     underflow to zero or overflow to infinity.
-
-     One constraint: always compute so that if the rounding mode
-     was upwards, then it would make the sets larger.
-     This means computing the positive upper bound as a positive
-     number, as well as the negative lower bound.
-     The positive lower bound and the negative upper bound must
-     be computed as negative numbers, so that if rounding were upwards,
-     they would end up closer to 0, making the sets larger. *)
-  let opp_neg_l = get_opp_finite_lower a1 +. get_opp_finite_lower a2 in
-  let neg_u = -0.001 (* assert false TODO obj_magic *) in
-  let opp_pos_l = -0.001 in (* TODO obj_magic *)
-  let pos_u = get_finite_upper a1 +. get_finite_upper a2 in
-
-  (* First, normalize. What may not look like a singleton before normalization
-     may turn out to be one afterwards: *)
-  let header, neg_l, neg_u, pos_l, pos_u =
-    normalize_for_add header (-. opp_neg_l) neg_u (-. opp_pos_l) pos_u
-  in
-  inject header neg_l neg_u pos_l pos_u
-
 (* Generic second-order function that handles the singleton case
    and applies the provided algorithm to the expanded arguments
    otherwise *)
@@ -1485,9 +1455,196 @@ let binop scalar_op expanded_op a1 a2 =
     let a2 = if single_a2 then expand a2 else a2 in
     expanded_op a1 a2
 
+(* [3, 5] [-4, -3.5] *)
+let add_expanded a1 a2 =
+  let header1 = Header.of_abstract_float a1 in
+  let header2 = Header.of_abstract_float a2 in
+  let p1 = Header.(test header1 positive_normalish) in
+  let p2 = Header.(test header2 positive_normalish) in
+  let n1 = Header.(test header1 negative_normalish) in
+  let n2 = Header.(test header2 negative_normalish) in
+  let fsucc f = Int64.(float_of_bits @@ succ @@ bits_of_float f) in
+  let fpred f = Int64.(float_of_bits @@ pred @@ bits_of_float f) in
+  let get_m pa na =
+    let pm = get_opp_pos_lower pa in
+    if (-.(get_opp_neg_lower na)) <= pm && pm <= get_neg_upper na then
+        Some (-.pm)
+    else
+      let nm = (-.(get_neg_upper na)) in
+      if (-.(get_opp_pos_lower pa)) < nm && nm <= get_pos_upper pa then
+        Some nm
+      else None in
+  let m1, m2 =
+    (if p1 && n2 then get_m a1 a2 else None),
+    (if n1 && p2 then get_m a2 a1 else None) in
+  let header = Header.add header1 header2 in
+  (* After getting the contributions to the result arising from the
+     header bits of the operands, the "expanded" versions of binary
+     operations need to compute the contributions resulting from the
+     (sub)normal parts of the operands.  Usually these contributions are
+     (sub)normal intervals, but operations on (sub)normal values can always
+     underflow to zero or overflow to infinity.
+
+     One constraint: always compute so that if the rounding mode
+     was upwards, then it would make the sets larger.
+     This means computing the positive upper bound as a positive
+     number, as well as the negative lower bound.
+     The positive lower bound and the negative upper bound must
+     be computed as negative numbers, so that if rounding were upwards,
+     they would end up closer to 0, making the sets larger. *)
+  let opp_neg_l = get_opp_finite_lower a1 +. get_opp_finite_lower a2 in
+  let pos_u = get_finite_upper a1 +. get_finite_upper a2 in
+  let opp_pos_l =
+    if p1 && p2
+    then get_opp_pos_lower a1 +. get_opp_pos_lower a2 else neg_infinity in
+  let neg_u =
+    if n1 && n2
+    then get_neg_upper a1 +. get_neg_upper a2 else neg_infinity in
+  let present a f =
+    ((-. (get_opp_pos_lower a)) <= f && f <= get_pos_upper a) ||
+    ((-. (get_opp_neg_lower a)) <= f && f <= get_neg_upper a) in
+  let opp_pos_l, neg_u =
+    match m1 with
+    | None ->
+      if p1 && n2
+      then
+        let f = get_opp_pos_lower a1 +. get_opp_neg_lower a2 in
+        if is_neg f then max opp_pos_l f, neg_u
+        else opp_pos_l, max neg_u (get_pos_upper a1 +. get_pos_upper a2)
+      else
+        opp_pos_l, neg_u
+    | Some m ->
+      let sm, pm = fsucc m, fpred m in
+      let opp_pos_l =
+        if present a1 sm then max (m -. sm) opp_pos_l else opp_pos_l in
+      let opp_pos_l =
+        if present a2 (-.pm) then max (pm -. m) opp_pos_l else opp_pos_l in
+      let neg_u =
+        if present a2 (-.sm) then max (m -. sm) neg_u else neg_u in
+      let neg_u =
+        if present a1 pm then max (pm -. m) neg_u else neg_u in
+      opp_pos_l, neg_u in
+  let opp_pos_l, neg_u =
+    match m2 with
+    | None ->
+      if n1 && p2
+      then
+        let f = get_neg_upper a1 +. get_pos_upper a2 in
+        if is_neg f then opp_pos_l, max neg_u f
+        else max opp_pos_l (get_opp_pos_lower a1 +. get_opp_pos_lower a2), neg_u
+      else
+        opp_pos_l, neg_u
+    | Some m ->
+      let sm, pm = fsucc m, fpred m in
+      let opp_pos_l =
+        if present a2 sm then max (m -. sm) opp_pos_l else opp_pos_l in
+      let opp_pos_l =
+        if present a1 (-.pm) then max (pm -. m) opp_pos_l else opp_pos_l in
+      let neg_u =
+        if present a1 (-.sm) then max (m -. sm) neg_u else neg_u in
+      let neg_u =
+        if present a2 pm then max (pm -. m) neg_u else neg_u in
+      opp_pos_l, neg_u in
+  let header =
+    match m1, m2 with
+    | Some _, _ | _, Some _ -> Header.(set_flag header positive_zero)
+    | _, _ -> header in
+  (* First, normalize. What may not look like a singleton before normalization
+     may turn out to be one afterwards: *)
+  let header, neg_l, neg_u, pos_l, pos_u =
+    normalize_for_add header (-. opp_neg_l) neg_u (-. opp_pos_l) pos_u
+  in
+  inject header neg_l neg_u pos_l pos_u
+
 (** [add a1 a2] returns the set of values that can be taken by adding a value
    from [a1] to a value from [a2]. *)
 let add = binop (fun r a1 a2 -> r.(0) <- a1.(0) +. a2.(0)) add_expanded
+
+module TestAdd = struct
+
+  let ppa a =
+    Format.printf "%a\n" pretty a
+
+  (* [-7, -2] u [3.5, 5] *)
+  let a_1 =
+    let h = Header.(set_flag bottom negative_normalish) in
+    let h = Header.(set_flag h positive_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_neg_lower a (-7.0);
+    set_neg_upper a (-2.0);
+    set_pos_lower a (3.5);
+    set_pos_upper a (5.0);
+    a
+
+  (* [-5, -3] u [1, 6] *)
+  let a_2 =
+    let h = Header.(set_flag bottom positive_normalish) in
+    let h = Header.(set_flag h negative_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_neg_lower a (-5.0);
+    set_neg_upper a (-3.0);
+    set_pos_lower a (1.0);
+    set_pos_upper a (6.0);
+    a
+
+  let a_3 =
+    let h = Header.(set_flag bottom negative_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_neg_lower a (-3.0);
+    set_neg_upper a (-1.0);
+    a
+
+  let a_4 =
+    let h = Header.(set_flag bottom positive_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_pos_lower a (4.0);
+    set_pos_upper a (5.0);
+    a
+
+  let a_6 =
+    let h = Header.(set_flag bottom negative_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_neg_lower a (-3.0);
+    set_neg_upper a (-2.0);
+    a
+
+  let a_7 =
+    let h = Header.(set_flag bottom positive_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_pos_lower a (1.0);
+    set_pos_upper a (5.0);
+    a
+
+  let a_8 =
+    let h = Header.(set_flag bottom negative_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_neg_lower a (-9.0);
+    set_neg_upper a (-7.0);
+    a
+
+  let a_9 =
+    let h = Header.(set_flag bottom positive_normalish) in
+    let a = Header.allocate_abstract_float h in
+    set_pos_lower a (1.0);
+    set_pos_upper a (3.0);
+    a
+
+
+  let a = add a_3 a_4
+  let b = add a_4 a_6
+  let c = add a_1 a_1
+  let d = add a_6 a_7
+  let e = add a_8 a_9
+  let f = add a_7 a_6
+  let g1 = add a_1 a_2
+  let g2 = add a_2 a_1
+
+end
+
+let () = TestAdd.(
+    ppa a; ppa b; ppa c;
+    ppa d; ppa e; ppa f;
+    ppa g1; ppa g2)
 
 let sub_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
@@ -1558,11 +1715,9 @@ let mult_expanded a1 a2 =
   in
   inject header neg_l neg_u pos_l pos_u
 
-
 (** [mult a1 a2] returns the set of values that can be taken by multiplying
     a value from [a1] with a value from [a2]. *)
 let mult = binop (fun r a1 a2 -> r.(0) <- a1.(0) *. a2.(0)) mult_expanded
-
 
 let div_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
@@ -1704,6 +1859,7 @@ module TestMultDiv = struct
 
 end
 
+(*
 let () =
   TestMultDiv.(ppa amult1);
   TestMultDiv.(ppa amult2);
@@ -1715,6 +1871,7 @@ let () =
   TestMultDiv.(ppa adiv3);
   TestMultDiv.(ppa adiv4);
   TestMultDiv.(ppa adiv5)
+*)
 
 
 (* *** Backwards functions *** *)
