@@ -1471,7 +1471,7 @@ let add_expanded a1 a2 =
         Some (-.pm)
     else
       let nm = (-.(get_neg_upper na)) in
-      if (-.(get_opp_pos_lower pa)) < nm && nm <= get_pos_upper pa then
+      if (-.(get_opp_pos_lower pa)) <= nm && nm <= get_pos_upper pa then
         Some nm
       else None in
   let m1, m2 =
@@ -1510,7 +1510,7 @@ let add_expanded a1 a2 =
       then
         let f = get_opp_pos_lower a1 +. get_opp_neg_lower a2 in
         if is_neg f then max opp_pos_l f, neg_u
-        else opp_pos_l, max neg_u (get_pos_upper a1 +. get_pos_upper a2)
+        else opp_pos_l, max neg_u (get_pos_upper a1 +. get_neg_upper a2)
       else
         opp_pos_l, neg_u
     | Some m ->
@@ -1531,7 +1531,9 @@ let add_expanded a1 a2 =
       then
         let f = get_neg_upper a1 +. get_pos_upper a2 in
         if is_neg f then opp_pos_l, max neg_u f
-        else max opp_pos_l (get_opp_pos_lower a1 +. get_opp_pos_lower a2), neg_u
+        else begin
+          max opp_pos_l (get_opp_neg_lower a1 +. get_opp_pos_lower a2), neg_u
+        end
       else
         opp_pos_l, neg_u
     | Some m ->
@@ -1548,7 +1550,7 @@ let add_expanded a1 a2 =
   let header =
     match m1, m2 with
     | Some _, _ | _, Some _ -> Header.(set_flag header positive_zero)
-    | _, _ -> header in
+    | None, None -> header in
   (* First, normalize. What may not look like a singleton before normalization
      may turn out to be one afterwards: *)
   let header, neg_l, neg_u, pos_l, pos_u =
@@ -1575,7 +1577,7 @@ module TestAdd = struct
     set_pos_lower a (3.5);
     set_pos_upper a (5.0);
     a
-
+  (* [2, 2] *)
   (* [-5, -3] u [1, 6] *)
   let a_2 =
     let h = Header.(set_flag bottom positive_normalish) in
@@ -1601,34 +1603,54 @@ module TestAdd = struct
     set_pos_upper a (5.0);
     a
 
-  let a_6 =
+  let a_5 =
     let h = Header.(set_flag bottom negative_normalish) in
     let a = Header.allocate_abstract_float h in
     set_neg_lower a (-3.0);
     set_neg_upper a (-2.0);
     a
 
-  let a_7 =
+  let a_6 =
     let h = Header.(set_flag bottom positive_normalish) in
     let a = Header.allocate_abstract_float h in
     set_pos_lower a (1.0);
     set_pos_upper a (5.0);
     a
 
-  let a_8 =
+  let a_7 =
     let h = Header.(set_flag bottom negative_normalish) in
     let a = Header.allocate_abstract_float h in
     set_neg_lower a (-9.0);
     set_neg_upper a (-7.0);
     a
 
-  let a_9 =
+  let a_8 =
     let h = Header.(set_flag bottom positive_normalish) in
     let a = Header.allocate_abstract_float h in
     set_pos_lower a (1.0);
     set_pos_upper a (3.0);
     a
 
+  let a_9 = [| 2.0 |]
+  let a_10 = [| -20.0 |]
+
+  let commute a1 a2 =
+    let a12 = add a1 a2 in
+    let a21 = add a2 a1 in
+    ppa a12; ppa a21;
+    compare a12 a21 = 0
+
+  let all_a = [|
+    a_1; a_2; a_3; a_4; a_5; a_6;
+    a_7; a_8|]
+
+  let test_commute () =
+    let e = Array.length all_a - 1 in
+    for i = 0 to e - 1 do
+      for j = i + 1 to e do
+        assert (commute all_a.(i) all_a.(j))
+      done
+    done
 
   let a = add a_3 a_4
   let b = add a_4 a_6
@@ -1637,14 +1659,26 @@ module TestAdd = struct
   let e = add a_8 a_9
   let f = add a_7 a_6
   let g1 = add a_1 a_2
-  let g2 = add a_2 a_1
+  let g2 = add a_1 a_6
+
+  let test_single () =
+    for i = 0 to Array.length all_a - 1 do
+      ppa (add a_9 all_a.(i));
+      ppa (add a_10 all_a.(i))
+    done
 
 end
+
+let () = TestAdd.test_single ()
 
 let () = TestAdd.(
     ppa a; ppa b; ppa c;
     ppa d; ppa e; ppa f;
     ppa g1; ppa g2)
+
+let () = TestAdd.test_commute ()
+
+let () = TestAdd.test_single ()
 
 let sub_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
@@ -1664,6 +1698,8 @@ let sub_expanded a1 a2 =
   inject header neg_l neg_u pos_l pos_u
 
 let sub = binop (fun r a1 a2 -> r.(0) <- a1.(0) -. a2.(0)) sub_expanded
+
+let sub a1 a2 = add a1 (neg a2)
 
 let mult_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
