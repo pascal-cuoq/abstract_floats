@@ -1865,13 +1865,9 @@ module TestAdd = struct
     assert(Header.check a21);
     assert(compare a12 a21 = 0);
     for i = 0 to 1000 do
-      Printf.printf "Add: start MC test %d\n" i;
       let rf1, rf2 = srf a1, srf a2 in
       let rf12 = rf1 +. rf2 in
-      (ppa a1; ppa a2; ppa a12;
-       Printf.printf "f1: %.16e\nf2: %.16e\nf12: %.16e\n" rf1 rf2 rf12);
-      assert(is_included (inject_float rf12) a12);
-      Printf.printf "Add: MC test %d successful\n" i
+      assert(is_included (inject_float rf12) a12)
     done
 
   let all_a = [|
@@ -1879,13 +1875,10 @@ module TestAdd = struct
     a_7; a_8|]
 
   let test_rand () =
-    print_endline "Add: start random testing";
     let f = RandomAF.random_abstract_float in
-    for i = 0 to 1_000_000 do
-      Printf.printf "Add: start random test %d\n" i;
+    for i = 0 to 100 do
       let a1, a2 = f (), f () in
       add_check a1 a2;
-      Printf.printf "Add: random test %d successful\n" i
     done
 
   let test_bugged1 () =
@@ -1908,7 +1901,9 @@ module TestAdd = struct
 
 end
 
+(*
 let () = TestAdd.test_rand ()
+*)
 
 let sub_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
@@ -2123,7 +2118,45 @@ module TestMultDiv = struct
 
   let adiv5 = div a_pos_1 a_neg_2
 
+  let mult_check a1 a2 =
+    let srf = RandomAF.random_select in
+    let a12 = mult a1 a2 in
+    let a21 = mult a2 a1 in
+    assert(Header.check a12);
+    assert(Header.check a21);
+    assert(compare a12 a21 = 0);
+    for i = 0 to 1000 do
+      let rf1, rf2 = srf a1, srf a2 in
+      let rf12 = rf1 *. rf2 in
+      Printf.printf "f1: %.16e\nf2: %.16e\nf12: %.16e\n" rf1 rf2 rf12;
+      ppa a1; ppa a2; ppa a12;
+      assert(is_included (inject_float rf12) a12)
+    done
+
+  let div_check a1 a2 =
+    let srf = RandomAF.random_select in
+    let a12 = div a1 a2 in
+    let a21 = div a2 a1 in
+    assert(Header.check a12);
+    assert(Header.check a21);
+    assert(compare a12 a21 = 0);
+    for i = 0 to 1000 do
+      let rf1, rf2 = srf a1, srf a2 in
+      let rf12 = rf1 /. rf2 in
+      assert(is_included (inject_float rf12) a12)
+    done
+
+  let test_rand () =
+    let f = RandomAF.random_abstract_float in
+    for i = 0 to 100 do
+      let a1, a2 = f (), f () in
+      mult_check a1 a2;
+      div_check a1 a2
+    done
+
 end
+
+let () = TestMultDiv.test_rand ()
 
 (*
 let () =
