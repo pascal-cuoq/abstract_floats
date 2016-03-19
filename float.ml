@@ -505,8 +505,14 @@ end = struct
     result
 
   (* sqrt(-0.) = -0., sqrt(+0.) = +0., sqrt(+inf) = +inf *)
-  let sqrt h = assert false
-
+  let sqrt h =
+    let nn = h land negative_normalish in
+    let ni = h land negative_inf in
+    let on = h land at_least_one_NaN in
+    let h = h lxor nn lxor ni in
+    let h = h lor (nn lsr 1) lor (ni lsr 3) lor (on lsl 1) in
+    h lor ((h land 2) lsr 1)
+ 
   (* only to implement sub from add *)
   let neg h =
     let neg = h land (negative_zero + negative_inf + negative_normalish) in
@@ -800,7 +806,6 @@ let inject_float f = Array.make 1 f
 
 let inject_interval f1 f2 = assert false (* TODO *)
 
-
 let is_singleton f = Array.length f = 1
 
 let zero = inject_float 0.0
@@ -1059,22 +1064,26 @@ module RandomAF = struct
     | 1 -> let h = Header.(set_flag h at_least_one_NaN) in
       let n = Int64.bits_of_float (random_NaN ()) in
       Header.(allocate_abstract_float_with_NaN h (One_NaN n))
-    | 2 -> let h = Header.set_all_NaNs h in
+    | _ -> let h = Header.set_all_NaNs h in
       Header.(allocate_abstract_float_with_NaN h All_NaN)
-    | _-> assert false
+
+  let random_pos_normalish () =
+    match Random.int 10 with
+    | 0 -> min_float
+    | 1 -> max_float
+    | _ -> Random.float 1_000_000.
 
   let random_float () =
     match Random.int 6 with
     | 0 -> neg_infinity
-    | 1 -> (-. (Random.float 1000000.))
+    | 1 -> -. (random_pos_normalish ())
     | 2 -> -0.0
     | 3 -> +0.0
-    | 4 -> Random.float 1000000.
-    | 5 -> infinity
-    | _ -> assert false
+    | 4 -> random_pos_normalish ()
+    | _ -> infinity
 
   let random_pos_range () =
-    let u = Random.float 1000000. in
+    let u = random_pos_normalish () in
     Random.float u, u
 
   let random_neg_range () =
@@ -1098,11 +1107,10 @@ module RandomAF = struct
         let h = Header.(set_flag h at_least_one_NaN) in
         let rNaN = Int64.bits_of_float (random_NaN ()) in
         Header.(allocate_abstract_float_with_NaN h (One_NaN rNaN))
-      | 2 ->
+      | _ ->
         let h = rand_n_flags Header.bottom 4 in
         let h = Header.set_all_NaNs h in
         Header.(allocate_abstract_float_with_NaN h All_NaN)
-      | _ -> assert false
       end
     | 2 -> begin
         let h = Header.(set_flag bottom positive_normalish) in
@@ -1116,7 +1124,7 @@ module RandomAF = struct
         let l, u = random_neg_range () in
         set_neg a l u; a
       end
-    | 4 -> begin
+    | _ -> begin
         let h = Header.(set_flag bottom negative_normalish) in
         let h = Header.(set_flag h positive_normalish) in
         let a = rand_add_NaNs (rand_n_flags h 4) in
@@ -1125,12 +1133,11 @@ module RandomAF = struct
         let l, u = random_neg_range () in
         set_neg a l u; a
       end
-    | _ -> assert false
 
   let random_select (a:abstract_float) : float =
     match Array.length a with
     | 1 -> a.(0)
-    | 2 | 3 | 5 ->
+    | _ ->
       let h = Header.of_abstract_float a in
       let all_flags =
         Header.([at_least_one_NaN; all_NaNs; negative_normalish;
@@ -1148,17 +1155,22 @@ module RandomAF = struct
         | _ -> assert false else begin
       if Header.(equal rflg negative_normalish) then
         let l, u = (-. (get_opp_neg_lower a)), get_neg_upper a in
-        l +. Random.float (u -. l) else
+        match Random.int 10 with
+        | 0 -> l
+        | 1 -> u
+        | _ -> l +. Random.float (u -. l) else
       if Header.(equal rflg positive_normalish) then
         let l, u = (-. (get_opp_pos_lower a)), get_pos_upper a in
-        l +. Random.float (u -. l) else
+        match Random.int 10 with
+        | 0 -> l
+        | 1 -> u
+        | _ -> l +. Random.float (u -. l) else
       if Header.(equal rflg negative_inf) then neg_infinity else
       if Header.(equal rflg positive_inf) then infinity else
       if Header.(equal rflg negative_zero) then -0.0 else
       if Header.(equal rflg positive_zero) then +0.0 else
         assert false
       end
-    | _ -> assert false
 
   let test_validity () =
     for _ = 0 to 1_000_000_000 do
@@ -1346,6 +1358,44 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       end;
       an
 
+module TestJoins = struct
+
+  let test_rand () =
+    print_endline "Join: start random tests";
+    let f = RandomAF.random_abstract_float in
+    for i = 0 to 1_000 do
+      let a1, a2 = f (), f () in
+      let a12 = join a1 a2 in
+      let a21 = join a2 a1 in
+      assert(Header.check a12);
+      assert(Header.check a21);
+      assert(compare a12 a21 = 0);
+      assert(is_included a1 a12);
+      assert(is_included a2 a12);
+    done;
+    print_endline "Join: random tests successful"
+
+  (* bug 1: RH's bug in ``merge_float``. Fixed.
+     bug 2: opened issue on PC's repo. Fixed here. *)
+  let test_bugged1 () =
+    let h = Header.(set_flag bottom positive_inf) in
+    let h = Header.(set_flag h negative_zero) in
+    let a1 = Header.(allocate_abstract_float h) in
+    let a2 = [|-1.5262258223503298e+3|] in
+    assert(Header.check (join a1 a2))
+
+  (* RH's bug in ``merge_float``. fixed *)
+  let test_bugged2 () =
+    let h = Header.(set_flag bottom positive_normalish) in
+    let a1 = Header.allocate_abstract_float h in
+    set_pos a1 4.6307227104214865e+307 9.3849706504711684e+307;
+    let a2 = [|-2.2396553445019165e+307|] in
+    assert (Header.check (join a1 a2))
+
+end
+
+let () = TestJoins.test_rand ()
+
 let meet a1 a2 = assert false
 
 (* [intersects a1 a2] is true iff there exists a float that is both in [a1]
@@ -1406,189 +1456,6 @@ let neg a =
     an
   | _ -> assert false
 
-module TestJoins = struct
-
-  let ppa a =
-    pretty Format.std_formatter a;
-    print_newline ()
-
-  let fNaN_1 = Int64.float_of_bits 0x7FF0000000000001L
-  let fNaN_2 = Int64.float_of_bits 0x7FF0000000000002L
-
-  let fNaN_3 = Int64.float_of_bits 0xFFF0000000000001L
-  let fNaN_4 = Int64.float_of_bits 0xFFF7FFFFFFFFFFFFL
-
-  let test (a1, s1) (a2, s2) =
-    Printf.printf "------------\nStart testing: %s %s\n" s1 s2;
-    Format.printf "%a;" pretty a1;
-    Format.printf " %a;" pretty a2;
-    Format.printf " %a@\n" pretty (join a1 a2);
-    Printf.printf "\nTest 1:\n";
-    if is_included a1 (join a1 a2) then Printf.printf "passed\n"
-    else begin
-      Printf.printf "Failure in test 1: %s, %s\n" s1 s2;
-      ppa a1; ppa a2; ppa (join a1 a2); assert false
-    end;
-    Printf.printf "\nTest 2:\n";
-    if is_included a1 (join a2 a1) then Printf.printf "passed\n"
-    else begin
-      Printf.printf "Failure in test 2: %s, %s\n" s1 s2;
-      ppa a1; ppa a2; ppa (join a2 a1); assert false
-    end
-
-  let monte_carlo_test_2 a1 a2 =
-    test a1 a2;
-    test a2 a1
-
-  let commute a1 a2 =
-    let j1, j2 = join a1 a2, join a2 a1 in
-    assert (is_included j1 j2 && is_included j2 j1)
-
-  let monte_carlo_test_3 a1 a2 a3 =
-    let s23 = Printf.sprintf "%s+%s" (snd a2) (snd a2) in
-    let s12 = Printf.sprintf "%s+%s" (snd a1) (snd a2) in
-    let s13 = Printf.sprintf "%s+%s" (snd a1) (snd a3) in
-    Printf.printf "mc_test_1: %s and %s\n" (snd a1) s23;
-    test a1 (join (fst a2) (fst a3), Printf.sprintf "%s+%s" (snd a2) (snd a3));
-    Printf.printf "mc_test_2: %s and %s\n" (snd a2) s13;
-    test a2 (join (fst a1) (fst a3), Printf.sprintf "%s+%s" (snd a1) (snd a3));
-    Printf.printf "mc_test_3: %s and %s\n" (snd a3) s12;
-    test a3 (join (fst a1) (fst a2), Printf.sprintf "%s+%s" (snd a1) (snd a2))
-
-  let produce_mc_tests a () =
-    let a = Array.of_list a in
-    let e = Array.length a - 1 in
-    for i = 0 to e do
-      for j = 0 to e do
-        monte_carlo_test_2 a.(i) a.(j)
-      done
-    done;
-    for i = 0 to e do
-      for j = 0 to e do
-        for k = 0 to e do
-          monte_carlo_test_3 a.(i) a.(j) a.(k)
-        done
-      done
-    done
-
-  let a_neg_1 =
-    let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_neg_lower a (-5.0);
-    set_neg_upper a (-1.0);
-    a, "a_neg_1"
-
-  let a_neg_2 =
-    let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_neg_lower a (-7.0);
-    set_neg_upper a (-2.0);
-    a, "a_neg_2"
-
-  let a_pos_1 =
-    let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_pos_lower a (2.0);
-    set_pos_upper a (5.0);
-    a, "a_pos_1"
-
-  let a_pos_2 =
-    let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_pos_lower a (3.0);
-    set_pos_upper a (7.0);
-    a, "a_pos_2"
-
-  let a_neg_pos =
-    let h = Header.(set_flag bottom positive_normalish) in
-    let h = Header.(set_flag h negative_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_neg_lower a (-7.0);
-    set_neg_upper a (-2.0);
-    set_pos_lower a (1.0);
-    set_pos_upper a (11.0);
-    assert (Header.check a);
-    a, "a_neg_pos"
-
-  let a_NaN_1 =
-    [|fNaN_1|], "a_NaN_1"
-
-  let a_NaN_2 =
-    [|fNaN_2|], "a_NaN_2"
-
-  let pinf, ninf, pzero, nzero =
-    ([|infinity|], "positive infinity"),
-    ([|(-.infinity)|], "negative infinity"),
-    ([|+0.0|], "positive zero"),
-    ([|-0.0|], "negative zero")
-
-  let a_all_NaN =
-    abstract_all_NaNs, "a_all_NaN"
-
-  let aa =
-    [a_neg_1; a_neg_2; a_pos_1; a_pos_2;
-     a_neg_pos; a_NaN_1; a_NaN_2; a_all_NaN;
-     pinf; ninf; pzero; nzero]
-
-  let test_join () =
-    produce_mc_tests aa ()
-
-  let test_commute () =
-    let a = Array.of_list aa in
-    let e = Array.length a - 1 in
-    for i = 0 to e - 1 do
-      for j = i + 1 to e do
-        commute (fst a.(i)) (fst a.(j))
-      done
-    done
-
-  let test_neg_1 () =
-    ppa (fst a_neg_1);
-    ppa (neg (fst a_neg_1))
-
-  let test_neg_2 () =
-    let a = join (fst a_neg_pos) (fst a_NaN_1) in
-    ppa a; ppa (neg a)
-
-  let test_rand () =
-    print_endline "Join: start random testing";
-    let f = RandomAF.random_abstract_float in
-    for i = 0 to 1_000_000_00 do
-      (* Printf.printf "Join: start random test %d\n" i; *)
-      let a1, a2 = f (), f () in
-      let a12 = join a1 a2 in
-      let a21 = join a2 a1 in
-      assert(Header.check a12);
-      assert(Header.check a21);
-      assert(compare a12 a21 = 0);
-      assert(is_included a1 a12);
-      assert(is_included a2 a12);
-      (* Printf.printf "Join: random test %d successful\n\n" i *)
-    done
-
-  (* bug 1: RH's bug in ``merge_float``. Fixed.
-     bug 2: opened issue on PC's repo. Fixed here. *)
-  let test_bugged1 () =
-    let h = Header.(set_flag bottom positive_inf) in
-    let h = Header.(set_flag h negative_zero) in
-    let a1 = Header.(allocate_abstract_float h) in
-    let a2 = [|-1.5262258223503298e+3|] in
-    assert(Header.check (join a1 a2))
-
-  (* RH's bug in ``merge_float``. fixed *)
-  let test_bugged2 () =
-    let h = Header.(set_flag bottom positive_normalish) in
-    let a1 = Header.allocate_abstract_float h in
-    set_pos a1 4.6307227104214865e+307 9.3849706504711684e+307;
-    let a2 = [|-2.2396553445019165e+307|] in
-    assert (Header.check (join a1 a2))
-
-end
-
-(*
-let () = TestJoins.test_rand ()
-*)
-
 let abstract_sqrt a =
   if is_singleton a
   then begin
@@ -1602,9 +1469,33 @@ let abstract_sqrt a =
     let new_h = Header.sqrt h in
     if Header.(test h positive_normalish)
     then
-      assert false
+      let na =
+        if Header.exactly_one_NaN new_h then
+          Header.(allocate_abstract_float_with_NaN new_h
+            (reconstruct_NaN a))
+        else
+          Header.allocate_abstract_float new_h in
+      let l, u = (-. (get_opp_pos_lower a)), (get_pos_upper a) in
+      set_pos na (sqrt l) (sqrt u);
+      na
     else
       Header.allocate_abstract_float new_h
+
+module TestSqrt = struct
+
+  let test_rand () =
+    print_endline "Sqrt: start random tests";
+    for i = 0 to 1_000_000 do
+      let a = RandomAF.random_abstract_float () in
+      let f1 = RandomAF.random_select a in
+      assert (is_included (inject_float (sqrt f1)) (abstract_sqrt a))
+    done;
+    print_endline "Sqrt: random tests successful"
+
+
+end
+
+let () = TestSqrt.test_rand ()
 
 (* [expand a] returns the non-singleton representation corresponding
    to a singleton [a].
@@ -1782,80 +1673,13 @@ let add_expanded a1 a2 =
    from [a1] to a value from [a2]. *)
 let add = binop (fun r a1 a2 -> r.(0) <- a1.(0) +. a2.(0)) add_expanded
 
-module TestAdd = struct
+module TestArithmetic = struct
 
   let ppa a =
     Format.printf "%a\n" pretty a
 
   let ppf f =
     Printf.printf "%.16e" f
-
-  (* [-7, -2] u [3.5, 5] *)
-  let a_1 =
-    let h = Header.(set_flag bottom negative_normalish) in
-    let h = Header.(set_flag h positive_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_neg_lower a (-7.0);
-    set_neg_upper a (-2.0);
-    set_pos_lower a (3.5);
-    set_pos_upper a (5.0);
-    a
-
-  (* [-5, -3] u [1, 6] *)
-  let a_2 =
-    let h = Header.(set_flag bottom positive_normalish) in
-    let h = Header.(set_flag h negative_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_neg_lower a (-5.0);
-    set_neg_upper a (-3.0);
-    set_pos_lower a (1.0);
-    set_pos_upper a (6.0);
-    a
-
-  let a_3 =
-    let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_neg_lower a (-3.0);
-    set_neg_upper a (-1.0);
-    a
-
-  let a_4 =
-    let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_pos_lower a (4.0);
-    set_pos_upper a (5.0);
-    a
-
-  let a_5 =
-    let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_neg_lower a (-3.0);
-    set_neg_upper a (-2.0);
-    a
-
-  let a_6 =
-    let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_pos_lower a (1.0);
-    set_pos_upper a (5.0);
-    a
-
-  let a_7 =
-    let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_neg_lower a (-9.0);
-    set_neg_upper a (-7.0);
-    a
-
-  let a_8 =
-    let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_pos_lower a (1.0);
-    set_pos_upper a (3.0);
-    a
-
-  let a_9 = [| 2.0 |]
-  let a_10 = [| -20.0 |]
 
   let add_check a1 a2 =
     let srf = RandomAF.random_select in
@@ -1870,40 +1694,18 @@ module TestAdd = struct
       assert(is_included (inject_float rf12) a12)
     done
 
-  let all_a = [|
-    a_1; a_2; a_3; a_4; a_5; a_6;
-    a_7; a_8|]
-
   let test_rand () =
+    print_endline "Arithmeitc: start random tests";
     let f = RandomAF.random_abstract_float in
     for i = 0 to 100 do
       let a1, a2 = f (), f () in
       add_check a1 a2;
-    done
-
-  let test_bugged1 () =
-    let h = Header.(set_flag bottom negative_zero) in
-    let h = Header.(set_flag h positive_inf) in
-    let h = Header.(set_flag h negative_inf) in
-    let h = Header.(set_flag h positive_normalish) in
-    let h = Header.(set_flag h negative_normalish) in
-    let a1 = Header.allocate_abstract_float h in
-    set_neg a1 (-1.3815388450137751e+308) (-1.3751703947864252e+307);
-    set_pos a1 5.8385402190790089e+307 7.6586669279810786e+307;
-    let fadded = -8.6187416740589240e+05 in
-    let a2 = inject_float fadded in
-    let a12 = add a1 a2 in
-    ppa a1;
-    ppa a2;
-    ppa a12;
-    assert(Header.check a12);
-    assert(is_included a2 a12)
+    done;
+    print_endline "Arithmetic: random tests successful"
 
 end
 
-(*
-let () = TestAdd.test_rand ()
-*)
+let () = TestArithmetic.test_rand ()
 
 let sub_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
@@ -2156,22 +1958,7 @@ module TestMultDiv = struct
 
 end
 
-let () = TestMultDiv.test_rand ()
-
-(*
-let () =
-  TestMultDiv.(ppa amult1);
-  TestMultDiv.(ppa amult2);
-  TestMultDiv.(ppa amult3);
-  TestMultDiv.(ppa amult4);
-  TestMultDiv.(ppa amult5);
-  TestMultDiv.(ppa adiv1);
-  TestMultDiv.(ppa adiv2);
-  TestMultDiv.(ppa adiv3);
-  TestMultDiv.(ppa adiv4);
-  TestMultDiv.(ppa adiv5)
-*)
-
+(* let () = TestMultDiv.test_rand () *)
 
 (* *** Backwards functions *** *)
 
