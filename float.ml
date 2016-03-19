@@ -488,14 +488,12 @@ end = struct
 
   (* sqrt(-0.) = -0., sqrt(+0.) = +0., sqrt(+inf) = +inf *)
   let sqrt h =
-    let nn = h land (negative_normalish + negative_inf) in
-    let on = h land at_least_one_NaN in
-    let all_reasons_to_have_NaN = nn lor on in
+    let nn = h land (negative_normalish + negative_inf + at_least_one_NaN) in
     let h = h lxor nn in (* clear negative_normalish and negative_inf if
                             present *)
-    let add_NaN = -all_reasons_to_have_NaN lsr 61 in
-(* if all_reasons_to_have_NaN is nonzero, add_NaN is 3.
-   if all_reasons_to_have_NaN is zero, add_NaN is 0. *)
+    let add_NaN = -nn lsr (Sys.word_size - 1 - 2) in
+(* if nn is nonzero, add_NaN is 3.
+   if nn is zero, add_NaN is 0. *)
     h lor add_NaN
 
   (* only to implement sub from add *)
