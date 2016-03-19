@@ -506,13 +506,16 @@ end = struct
 
   (* sqrt(-0.) = -0., sqrt(+0.) = +0., sqrt(+inf) = +inf *)
   let sqrt h =
-    let nn = h land negative_normalish in
-    let ni = h land negative_inf in
+    let nn = h land (negative_normalish + negative_inf) in
     let on = h land at_least_one_NaN in
-    let h = h lxor nn lxor ni in
-    let h = h lor (nn lsr 1) lor (ni lsr 3) lor (on lsl 1) in
-    h lor ((h land 2) lsr 1)
- 
+    let all_reasons_to_have_NaN = nn lor on in
+    let h = h lxor nn in (* clear negative_normalish and negative_inf if
+                            present *)
+    let add_NaN = -all_reasons_to_have_NaN lsr 61 in
+(* if all_reasons_to_have_NaN is nonzero, add_NaN is 3.
+   if all_reasons_to_have_NaN is zero, add_NaN is 0. *)
+    h lor add_NaN
+
   (* only to implement sub from add *)
   let neg h =
     let neg = h land (negative_zero + negative_inf + negative_normalish) in
