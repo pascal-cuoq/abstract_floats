@@ -62,13 +62,14 @@ module RandomAF = struct
     | _ -> Random.float 1_000_000.
 
   let random_float () =
-    match Random.int 6 with
+    match Random.int 7 with
     | 0 -> neg_infinity
     | 1 -> -. (random_pos_normalish ())
     | 2 -> -0.0
     | 3 -> +0.0
     | 4 -> random_pos_normalish ()
-    | _ -> infinity
+    | 5 -> infinity
+    | _ -> random_NaN ()
 
   let random_pos_range () =
     let u = random_pos_normalish () in

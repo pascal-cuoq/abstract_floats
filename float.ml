@@ -603,8 +603,6 @@ end = struct
   let div h1 h2 = mult h1 (inv h2)
 end
 
-
-
 (*
   If negative_normalish, the negative bounds are always at t.(1) and t.(2)
 
@@ -1221,14 +1219,10 @@ let neg a =
                     neg_h (One_NaN (Int64.neg n)))
       | _ -> Header.allocate_abstract_float neg_h in
     if Header.(test neg_h positive_normalish) then begin
-      (* [-3, -1] ~> [1, 3]
-         (3, -1) --> (-1, 3) *)
       set_opp_pos_lower an (get_neg_upper a);
       set_pos_upper an (get_opp_neg_lower a)
     end;
     if Header.(test neg_h negative_normalish) then begin
-       (* [1, 3] ~> [-3, -1]
-         (-1, 3) -> (3, -1) *)
       set_opp_neg_lower an (get_pos_upper a);
       set_neg_upper an (get_opp_pos_lower a)
     end;
