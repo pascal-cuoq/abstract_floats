@@ -162,7 +162,7 @@ module RandomAF = struct
       end
 
   let test_validity () =
-    for _ = 0 to 1_000_000_000 do
+    for i = 0 to 1_000_000_000 do
       assert(Header.check (random_abstract_float ()))
     done;
     print_endline "RandomAF checked"
@@ -238,20 +238,25 @@ module TestArithmetic = struct
     for i = 0 to 1000 do
       let rf1, rf2 = srf a1, srf a2 in
       let rf12 = op1 rf1 rf2 in
-      assert(is_included (inject_float rf12) a12)
+      if not (float_in_abstract_float rf12 a12)
+      then begin
+	  Format.printf "%a\n%a\n%a\n\n%.16e\n%.16e\n%.16e\n"
+	    pretty a1 pretty a2 pretty a12
+	    rf1 rf2 rf12;
+	  assert false;
+	end;      
     done
 
   let test_rand () =
-    print_endline "Arithmeitc: start random tests";
+    print_endline "Arithmetic: start random tests";
     let f = RandomAF.random_abstract_float in
-    for i = 0 to 100 do
+    for i = 0 to 1000 do
       let a1, a2 = f (), f () in
       test ( +. ) add a1 a2;
       test ( -. ) sub a1 a2;
-(*
       test ( *. ) mult a1 a2;
       test ( /. ) div a1 a2
-*)
+
     done;
     print_endline "Arithmetic: random tests successful"
 

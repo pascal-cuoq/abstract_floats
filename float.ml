@@ -781,26 +781,6 @@ let insert_all_bounds a1 a2 : unit =
     insert_float_in_bounds a2 (if i mod 2 = 1 then (-.a1.(i)) else a1.(i))
   done
 
-(*
-  Examples for testing: [1.0 … 2.0], [-10.0 … -9.0]
-*)
-
-let onetwo =
-  let header = Header.(of_flag positive_normalish) in
-  let r = Header.(allocate_abstract_float header) in
-  set_pos_lower r 1.0;
-  set_pos_upper r 2.0;
-  assert (Header.check r);
-  r
-
-let minus_nineten =
-  let header = Header.(of_flag negative_normalish) in
-  let r = Header.(allocate_abstract_float header) in
-  set_neg_lower r (-10.0);
-  set_neg_upper r (-9.0);
-  assert (Header.check r);
-  r
-
 let inject_float f = Array.make 1 f
 
 let inject_interval f1 f2 = assert false (* TODO *)
