@@ -600,9 +600,14 @@ end = struct
     let pos_inf = pos_inf land positive_inf in
 
     (* compute in the negative_inf bit: *)
-    let neg_inf12 = (has_nonzero1 lsr 1) land h2 in
-    let neg_inf21 = (has_nonzero2 lsr 1) land h1 in
-    let neg_inf = neg_inf12 lor neg_inf21 in
+    let pos_nonzero_1_neg_inf_2 = (has_nonzero1 lsr 1) land h2 in
+    let pos_nonzero_2_neg_inf_1 = (has_nonzero2 lsr 1) land h1 in
+    let neg_nonzero_1_pos_inf_2 = has_nonzero1 land (h2 lsr 1) in
+    let neg_nonzero_2_pos_inf_1 = has_nonzero2 land (h1 lsr 1) in
+    let neg_inf = 
+      pos_nonzero_2_neg_inf_1 lor neg_nonzero_2_pos_inf_1 lor
+	pos_nonzero_1_neg_inf_2 lor neg_nonzero_1_pos_inf_2 
+    in
     let neg_inf = neg_inf land negative_inf in
 
     neg_inf lor pos_inf lor neg_zero lor pos_zero lor nan
