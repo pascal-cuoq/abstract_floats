@@ -23,3 +23,6 @@ setup.data
 setup.log
 
 *.swp
+
+# Emacs
+*~
