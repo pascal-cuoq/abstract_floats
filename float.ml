@@ -259,9 +259,7 @@ module Header : sig
       are uninitialized. *)
 
   val reconstruct_NaN : abstract_float -> nan_result
-  (** [reconstruct_NaN a] is potential payload of [a].
-      The result is [None] if [a]'s header does not
-      indicate [at_least_one_NaN] *)
+  (** [reconstruct_NaN a] is the NaN representation in [a], if there is one. *)
 
   val check: abstract_float -> bool
   (** [assert (check a);] stops execution if a is ill-formed. *)
@@ -488,17 +486,14 @@ end = struct
 
   (* sqrt(-0.) = -0., sqrt(+0.) = +0., sqrt(+inf) = +inf *)
   let sqrt h =
-    let nn = h land (negative_normalish + negative_inf) in
-    let on = h land at_least_one_NaN in
-    let all_reasons_to_have_NaN = nn lor on in
+    let nn = h land (negative_normalish + negative_inf + at_least_one_NaN) in
     let h = h lxor nn in (* clear negative_normalish and negative_inf if
                             present *)
-    let add_NaN = -all_reasons_to_have_NaN lsr 61 in
-(* if all_reasons_to_have_NaN is nonzero, add_NaN is 3.
-   if all_reasons_to_have_NaN is zero, add_NaN is 0. *)
+    let add_NaN = -nn lsr (Sys.word_size - 1 - 2) in
+(* if nn is nonzero, add_NaN is 3.
+   if nn is zero, add_NaN is 0. *)
     h lor add_NaN
 
-  (* only to implement sub from add *)
   let neg h =
     let neg = h land (negative_zero + negative_inf + negative_normalish) in
     let pos = h land (positive_zero + positive_inf + positive_normalish) in
@@ -579,8 +574,11 @@ end = struct
     let merge_posneg2 = (h2 lsl 1) lor h2 in
     let nan12 = (merge_posneg1 lsl 2) land h2 in
     let nan21 = (merge_posneg2 lsl 2) land h1 in
-    let nan = (nan12 lor nan21) land positive_zero in
-    (* Map 128 to 3 and 0 to 0: *)
+    let nan_zero_times_inf = (nan12 lor nan21) land positive_zero in
+    (* are there NaNs in operands? *)
+    let nan_as_op = (h1 lor h2) land at_least_one_NaN in
+    let nan = nan_zero_times_inf lor nan_as_op in
+    (* Map nonzero to 3 and 0 to 0: *)
     let nan = (- nan) lsr (Sys.word_size - 1 - 2) in
 
     (* compute in the infinities bits: *)
