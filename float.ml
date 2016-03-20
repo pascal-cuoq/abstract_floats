@@ -604,12 +604,12 @@ end = struct
 
     let infinities = neg_inf lor pos_inf in
 
-    (* Compute in positive_zero and positive_inf bits: *)
-    let merge_posneg1 = (h1 lsl 1) lor h1 in
-    let merge_posneg2 = (h2 lsl 1) lor h2 in
-    let nan12 = (merge_posneg1 lsl 2) land h2 in
-    let nan21 = (merge_posneg2 lsl 2) land h1 in
-    let nan_zero_times_inf = (nan12 lor nan21) land positive_zero in
+    (* Compute in negative_zero and negative_inf bits: *)
+    let merge_posneg1 = h1sr lor h1 in
+    let merge_posneg2 = h2sr lor h2 in
+    let nan12 = (merge_posneg1 lsl 2) land merge_posneg2 in
+    let nan21 = (merge_posneg2 lsl 2) land merge_posneg1 in
+    let nan_zero_times_inf = (nan12 lor nan21) land negative_zero in
     (* are there NaNs in operands? *)
     let nan_as_op = (h1 lor h2) land at_least_one_NaN in
     let nan = nan_zero_times_inf lor nan_as_op in
