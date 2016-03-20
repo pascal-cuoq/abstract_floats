@@ -552,6 +552,8 @@ end = struct
     stay lor new_infs lor new_zeroes
 
   let mult h1 h2 =
+    (* has_finite indicates the presente of finite negative values in
+       negative_zero, of finite positive values in positive_zero *)
     let has_finite1 = (h1 lsl 4) lor h1 in
     let has_finite2 = (h2 lsl 4) lor h2 in
     let same_signs12 = has_finite1 land h2 in
@@ -564,9 +566,14 @@ end = struct
     let pos_zero = pos_zero land positive_zero in
 
     (* Compute in negative_zero bit: *)
-    let opposite_signs12 = (has_finite2 lsr 1) land h1 in
-    let opposite_signs21 = (has_finite1 lsr 1) land h2 in
-    let opposite_signs = opposite_signs12 lor opposite_signs21 in
+    let finite_pos2_neg_zero_1 = (has_finite2 lsr 1) land h1 in
+    let finite_pos1_neg_zero_2 = (has_finite1 lsr 1) land h2 in
+    let finite_neg1_pos_zero_2 = has_finite1 land (h2 lsr 1) in
+    let finite_neg2_pos_zero_1 = has_finite2 land (h1 lsr 1) in
+    let opposite_signs =
+      finite_pos2_neg_zero_1 lor finite_pos1_neg_zero_2 lor
+	finite_neg1_pos_zero_2 lor finite_neg2_pos_zero_1
+    in
     let neg_zero = opposite_signs land negative_zero in
 
     (* Compute in positive_zero and positive_inf bits: *)
