@@ -258,13 +258,6 @@ module Header : sig
       size indicated by [h], of which the normalish fields, if any,
       are uninitialized. *)
 
-(*
-  val allocate_abstract_float_with_NaN : t -> float -> abstract_float
-*)
-  (** [allocate_abstract_float_with_NaN h f] is an abstract float with header
-    indicating at least one NaN. [f], which is expected to be a NaN value,
-    is used to set the payload of the result abstract float *)
-
   val reconstruct_NaN : abstract_float -> nan_result
   (** [reconstruct_NaN a] is potential payload of [a].
       The result is [None] if [a]'s header does not
@@ -414,19 +407,8 @@ end = struct
     assert (test h all_NaNs || (not (test h at_least_one_NaN)));
     Array.make (size h) (Int64.float_of_bits (Int64.of_int (h lsl 52)))
 
-(*
-  let allocate_abstract_float_with_NaN h f =
-    assert (classify_float f = FP_nan);
-    assert (exactly_one_NaN h);
-    let payload =
-      Int64.(logand (bits_of_float f) payload_mask) in
-    let with_flags =
-      Int64.(float_of_bits (logor (of_int (h lsl 52)) payload)) in
-    Array.make (size h) with_flags
-*)
-
-(** [reconstruct_NaN a] returns the bits of the single NaN value
-    optionally contained in [a] *)
+  (** [reconstruct_NaN a] returns the bits of the single NaN value
+      optionally contained in [a] *)
   let reconstruct_NaN a =
     assert (Array.length a >= 2);
     let h = of_abstract_float a in
@@ -1488,13 +1470,12 @@ module TestSqrt = struct
 
   let test_rand () =
     print_endline "Sqrt: start random tests";
-    for i = 0 to 1_000_000 do
+    for i = 0 to 1_000_00 do
       let a = RandomAF.random_abstract_float () in
       let f1 = RandomAF.random_select a in
       assert (is_included (inject_float (sqrt f1)) (abstract_sqrt a))
     done;
     print_endline "Sqrt: random tests successful"
-
 
 end
 
@@ -1551,7 +1532,7 @@ let binop scalar_op expanded_op a1 a2 =
   then
     let result = [| 0.0 |] in
     scalar_op result a1 a2;
-    if result <> result (* NaN *)
+    if result <> result
     then abstract_all_NaNs
     else result
   else
@@ -1559,7 +1540,6 @@ let binop scalar_op expanded_op a1 a2 =
     let a2 = if single_a2 then expand a2 else a2 in
     expanded_op a1 a2
 
-(* [3, 5] [-4, -3.5] *)
 let add_expanded a1 a2 =
   let header1 = Header.of_abstract_float a1 in
   let header2 = Header.of_abstract_float a2 in
@@ -1702,7 +1682,7 @@ module TestArithmetic = struct
     let f = RandomAF.random_abstract_float in
     for i = 0 to 100 do
       let a1, a2 = f (), f () in
-      add_check a1 a2;
+      add_check a1 a2
     done;
     print_endline "Arithmetic: random tests successful"
 
@@ -1843,86 +1823,6 @@ module TestMultDiv = struct
   let ppa a =
     Format.printf "%a\n" pretty a
 
-  (* [-7, -2] u [3, 5] *)
-  let a_1 =
-    let h = Header.(set_flag bottom negative_normalish) in
-    let h = Header.(set_flag h positive_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_neg_lower a (-7.0);
-    set_neg_upper a (-2.0);
-    set_pos_lower a (3.0);
-    set_pos_upper a (5.0);
-    a
-
-  (* [-5, -3] u [1, 6] *)
-  let a_2 =
-    let h = Header.(set_flag bottom positive_normalish) in
-    let h = Header.(set_flag h negative_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_neg_lower a (-5.0);
-    set_neg_upper a (-3.0);
-    set_pos_lower a (1.0);
-    set_pos_upper a (6.0);
-    a
-
-  (* [2, 5] *)
-  let a_pos_1 =
-    let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_pos_lower a (2.0);
-    set_pos_upper a (5.0);
-    a
-
-  (* [3, 7] *)
-  let a_pos_2 =
-    let h = Header.(set_flag bottom positive_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_pos_lower a (3.0);
-    set_pos_upper a (7.0);
-    a
-
-  (* [-5, -1] *)
-  let a_neg_1 =
-    let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_neg_lower a (-5.0);
-    set_neg_upper a (-1.0);
-    a
-
-  (* [-7, -2] *)
-  let a_neg_2 =
-    let h = Header.(set_flag bottom negative_normalish) in
-    let a = Header.allocate_abstract_float h in
-    set_neg_lower a (-7.0);
-    set_neg_upper a (-2.0);
-    a
-
-  (* [-42., -2] * [3., 35.] *)
-  let amult1 = mult a_1 a_2
-
-  (* [-49., -6] * [9., 35.] *)
-  let amult2 = mult a_1 a_pos_2
-
-  (* [6., 35.] *)
-  let amult3 = mult a_pos_1 a_pos_2
-
-  (* [2., 35.] *)
-  let amult4 = mult a_neg_1 a_neg_2
-
-  (* [-35., -4.] *)
-  let amult5 = mult a_pos_1 a_neg_2
-
-  (* [-7., -0.333...] * [0.4, 5.] *)
-  let adiv1 = div a_1 a_2
-
-  let adiv2 = div a_1 a_pos_2
-
-  let adiv3 = div a_pos_1 a_pos_2
-
-  let adiv4 = div a_neg_1 a_neg_2
-
-  let adiv5 = div a_pos_1 a_neg_2
-
   let mult_check a1 a2 =
     let srf = RandomAF.random_select in
     let a12 = mult a1 a2 in
@@ -1933,7 +1833,6 @@ module TestMultDiv = struct
     for i = 0 to 1000 do
       let rf1, rf2 = srf a1, srf a2 in
       let rf12 = rf1 *. rf2 in
-      Printf.printf "f1: %.16e\nf2: %.16e\nf12: %.16e\n" rf1 rf2 rf12;
       ppa a1; ppa a2; ppa a12;
       assert(is_included (inject_float rf12) a12)
     done
@@ -1961,7 +1860,7 @@ module TestMultDiv = struct
 
 end
 
-(* let () = TestMultDiv.test_rand () *)
+let () = TestMultDiv.test_rand ()
 
 (* *** Backwards functions *** *)
 
