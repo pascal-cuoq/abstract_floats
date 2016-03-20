@@ -1107,7 +1107,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       | (FP_zero, FP_zero, _, _ | FP_infinite, FP_infinite, _, _)
         when (is_pos f1 && is_pos f2) ||
              (is_neg f1 && is_neg f2) -> [|f1|]
-      | (FP_normal, FP_normal, _, _ | FP_subnormal, FP_subnormal, _, _)
+      | (FP_normal | FP_subnormal), (FP_normal | FP_subnormal), _, _
         when f1 = f2 -> [|f1|]
       | _, _, _, _ -> begin
         let h = set_header_from_float f1 Header.bottom in
@@ -1171,7 +1171,6 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       | _, _, _, _, _ -> assert false
       end;
       an
-
 
 let meet a1 a2 = assert false
 
@@ -1242,12 +1241,7 @@ let abstract_sqrt a =
     let new_h = Header.sqrt h in
     if Header.(test h positive_normalish)
     then
-      let na =
-        if Header.exactly_one_NaN new_h then
-          Header.(allocate_abstract_float_with_NaN new_h
-            (reconstruct_NaN a))
-        else
-          Header.allocate_abstract_float new_h in
+      let na = Header.allocate_abstract_float new_h in
       let l, u = (-. (get_opp_pos_lower a)), (get_pos_upper a) in
       set_pos na (sqrt l) (sqrt u);
       na
@@ -1428,25 +1422,6 @@ let add_expanded a1 a2 =
 (** [add a1 a2] returns the set of values that can be taken by adding a value
    from [a1] to a value from [a2]. *)
 let add = binop (fun r a1 a2 -> r.(0) <- a1.(0) +. a2.(0)) add_expanded
-
-let sub_expanded a1 a2 =
-  let header1 = Header.of_abstract_float a1 in
-  let header2 = Header.of_abstract_float a2 in
-  let header = Header.sub header1 header2 in
-
-  let opp_neg_l = assert false in
-  let neg_u = assert false in
-  let opp_pos_l = assert false in
-  let pos_u = assert false in
-
-  (* First, normalize. What may not look like a singleton before normalization
-     may turn out to be one afterwards: *)
-  let header, neg_l, neg_u, pos_l, pos_u =
-    normalize_for_add header (-. opp_neg_l) neg_u (-. opp_pos_l) pos_u
-  in
-  inject header neg_l neg_u pos_l pos_u
-
-let sub = binop (fun r a1 a2 -> r.(0) <- a1.(0) -. a2.(0)) sub_expanded
 
 let sub a1 a2 = add a1 (neg a2)
 
