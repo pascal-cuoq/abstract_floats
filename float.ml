@@ -568,13 +568,41 @@ end = struct
     (* Compute in negative_zero bit: *)
     let finite_pos2_neg_zero_1 = (has_finite2 lsr 1) land h1 in
     let finite_pos1_neg_zero_2 = (has_finite1 lsr 1) land h2 in
-    let finite_neg1_pos_zero_2 = has_finite1 land (h2 lsr 1) in
-    let finite_neg2_pos_zero_1 = has_finite2 land (h1 lsr 1) in
+    let h2sr = h2 lsr 1 in
+    let finite_neg1_pos_zero_2 = has_finite1 land h2sr in
+    let h1sr = h1 lsr 1 in
+    let finite_neg2_pos_zero_1 = has_finite2 land h1sr in
     let opposite_signs =
       finite_pos2_neg_zero_1 lor finite_pos1_neg_zero_2 lor
 	finite_neg1_pos_zero_2 lor finite_neg2_pos_zero_1
     in
     let neg_zero = opposite_signs land negative_zero in
+
+    let zeroes = pos_zero lor neg_zero in
+
+    (* compute in the infinities bits: *)
+    let has_nonzero1 = (h1 lsl 2) lor h1 in
+    let has_nonzero2 = (h2 lsl 2) lor h2 in
+
+    (* compute in the negative_inf bit: *)
+    let neg_nonzero_1_pos_inf_2 = has_nonzero1 land h2sr in
+    let neg_nonzero_2_pos_inf_1 = has_nonzero2 land h1sr in
+    let pos_nonzero_1_neg_inf_2 = (has_nonzero1 lsr 1) land h2 in
+    let pos_nonzero_2_neg_inf_1 = (has_nonzero2 lsr 1) land h1 in
+    let neg_inf = 
+      pos_nonzero_2_neg_inf_1 lor neg_nonzero_2_pos_inf_1 lor
+	pos_nonzero_1_neg_inf_2 lor neg_nonzero_1_pos_inf_2 
+    in
+    let neg_inf = neg_inf land negative_inf in
+
+    (* +inf is obtained by multiplying nonzero and inf of the same sign: *)
+    let pos_inf12 = has_nonzero1 land h2 in
+    let pos_inf21 = has_nonzero2 land h1 in
+    let pos_inf = pos_inf12 lor pos_inf21 in
+    let pos_inf = pos_inf lor (pos_inf lsl 1) in
+    let pos_inf = pos_inf land positive_inf in
+
+    let infinities = neg_inf lor pos_inf in
 
     (* Compute in positive_zero and positive_inf bits: *)
     let merge_posneg1 = (h1 lsl 1) lor h1 in
@@ -588,29 +616,7 @@ end = struct
     (* Map nonzero to 3 and 0 to 0: *)
     let nan = (- nan) lsr (Sys.word_size - 1 - 2) in
 
-    (* compute in the infinities bits: *)
-    let has_nonzero1 = (h1 lsl 2) lor h1 in
-    let has_nonzero2 = (h2 lsl 2) lor h2 in
-
-    (* +inf is obtained by multiplying nonzero and inf of the same sign: *)
-    let pos_inf12 = has_nonzero1 land h2 in
-    let pos_inf21 = has_nonzero2 land h1 in
-    let pos_inf = pos_inf12 lor pos_inf21 in
-    let pos_inf = pos_inf lor (pos_inf lsl 1) in
-    let pos_inf = pos_inf land positive_inf in
-
-    (* compute in the negative_inf bit: *)
-    let pos_nonzero_1_neg_inf_2 = (has_nonzero1 lsr 1) land h2 in
-    let pos_nonzero_2_neg_inf_1 = (has_nonzero2 lsr 1) land h1 in
-    let neg_nonzero_1_pos_inf_2 = has_nonzero1 land (h2 lsr 1) in
-    let neg_nonzero_2_pos_inf_1 = has_nonzero2 land (h1 lsr 1) in
-    let neg_inf = 
-      pos_nonzero_2_neg_inf_1 lor neg_nonzero_2_pos_inf_1 lor
-	pos_nonzero_1_neg_inf_2 lor neg_nonzero_1_pos_inf_2 
-    in
-    let neg_inf = neg_inf land negative_inf in
-
-    neg_inf lor pos_inf lor neg_zero lor pos_zero lor nan
+    infinities lor zeroes lor nan
 
   let div h1 h2 = mult h1 (inv h2)
 end
