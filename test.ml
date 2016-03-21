@@ -40,7 +40,7 @@ module RandomAF = struct
       else loop (rand_set_flag h) (i + 1) in
     loop h 0
 
-  (* not really random *)
+  (* not really random, but we should write in this way *)
   let random_NaN () =
     if Random.bool () then Int64.float_of_bits 0x7FF0000024560001L else
     if Random.bool () then Int64.float_of_bits 0xFFF0000005743001L else
@@ -56,10 +56,14 @@ module RandomAF = struct
       Header.(allocate_abstract_float_with_NaN h All_NaN)
 
   let random_pos_normalish () =
-    match Random.int 10 with
+    match Random.int 15 with
     | 0 -> min_float
     | 1 -> max_float
-    | _ -> Random.float 1_000_000.
+    | 2 -> Random.float min_float
+    | 3 | 4 -> Random.float max_float
+    | 5 -> Random.float 2e-308
+    | 6 -> 2e-308
+    | _ -> Random.float 1_000_00.
 
   let random_float () =
     match Random.int 7 with
@@ -82,7 +86,8 @@ module RandomAF = struct
   let random_abstract_float () =
     shuffle_flags ();
     match Random.int 5 with
-    | 0 -> inject_float (random_float ())
+    | 0 -> let f = random_float () in
+      inject_float (if Random.bool () then f else (-. f))
     | 1 -> begin
       match Random.int 3 with
       | 0 ->
@@ -167,15 +172,18 @@ module RandomAF = struct
     done;
     print_endline "RandomAF checked"
 
+  let random_AF_pair () =
+    let af = random_abstract_float () in
+    if Random.int 20 < 1 then af, af else af, random_abstract_float ()
+
 end
 
 module TestJoins = struct
 
   let test_rand () =
     print_endline "Join: start random tests";
-    let f = RandomAF.random_abstract_float in
-    for i = 0 to 1_000 do
-      let a1, a2 = f (), f () in
+    for i = 0 to 10000 do
+      let a1, a2 = RandomAF.random_AF_pair () in
       let a12 = join a1 a2 in
       let a21 = join a2 a1 in
       assert(Header.check a12);
@@ -184,7 +192,19 @@ module TestJoins = struct
       assert(is_included a1 a12);
       assert(is_included a2 a12);
     done;
+    for i = 0 to 1000 do
+      let a1 = RandomAF.random_abstract_float () in
+      let f = RandomAF.random_select a1 in
+      assert (float_in_abstract_float f a1)
+    done;
     print_endline "Join: random tests successful"
+
+  let test_others () =
+    let a = inject_float (2e-308) in
+    assert(Header.check (join a a));
+    let h = Header.(set_flag (of_flag positive_zero) negative_inf) in
+    let a = Header.allocate_abstract_float h in
+    assert(not @@ float_in_abstract_float nan a)
 
   (* bug 1: RH's bug in ``merge_float``. Fixed.
      bug 2: opened issue on PC's repo. Fixed here. *)
@@ -205,8 +225,8 @@ module TestJoins = struct
 
 end
 
+let () = TestJoins.test_others ()
 let () = TestJoins.test_rand ()
-
 
 module TestSqrt = struct
 
@@ -215,7 +235,7 @@ module TestSqrt = struct
     for i = 0 to 1_000_00 do
       let a = RandomAF.random_abstract_float () in
       let f1 = RandomAF.random_select a in
-      assert (is_included (inject_float (sqrt f1)) (abstract_sqrt a))
+      assert (float_in_abstract_float (sqrt f1) (abstract_sqrt a))
     done;
     print_endline "Sqrt: random tests successful"
 
@@ -240,18 +260,17 @@ module TestArithmetic = struct
       let rf12 = op1 rf1 rf2 in
       if not (float_in_abstract_float rf12 a12)
       then begin
-	  Format.printf "%a\n%a\n%a\n\n%.16e\n%.16e\n%.16e\n"
-	    pretty a1 pretty a2 pretty a12
-	    rf1 rf2 rf12;
-	  assert false;
-	end;      
+        Format.printf "%a\n%a\n%a\n\n%.16e\n%.16e\n%.16e\n"
+        pretty a1 pretty a2 pretty a12
+        rf1 rf2 rf12;
+        assert false;
+    end;
     done
 
   let test_rand () =
     print_endline "Arithmetic: start random tests";
-    let f = RandomAF.random_abstract_float in
-    for i = 0 to 1000 do
-      let a1, a2 = f (), f () in
+    for i = 0 to 100 do
+      let a1, a2 = RandomAF.random_AF_pair () in
       test ( +. ) add a1 a2;
       test ( -. ) sub a1 a2;
       test ( *. ) mult a1 a2;
@@ -263,4 +282,21 @@ module TestArithmetic = struct
 end
 
 let () = TestArithmetic.test_rand ()
+
+module TestPretty = struct
+
+  let ppa a =
+    Format.asprintf "%a\n" pretty a
+
+  let test_rand () =
+    print_endline "Pretty: start random tests";
+    for i = 0 to 1_000_00 do
+      let a1 = RandomAF.random_abstract_float () in
+      ignore (ppa a1)
+    done;
+    print_endline "Pretty: random tests successful";
+
+end
+
+let () = TestPretty.test_rand ()
 
