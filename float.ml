@@ -165,8 +165,8 @@ module Header : sig
 
   type nan_result =
     | One_NaN of Int64.t (** abstract float has one NaN value in payload *)
-    | All_NaN (** abstract float contains all possible NaN values *)
-    | No_NaN (** abstract float contains no NaN value *)
+    | All_NaN            (** abstract float contains all possible NaN values *)
+    | No_NaN             (** abstract float contains no NaN value *)
 
   type flag
   (** abstract flag indicating property of abstract float *)
@@ -1105,8 +1105,7 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
       | (FP_zero, FP_zero, _, _ | FP_infinite, FP_infinite, _, _)
         when (is_pos f1 && is_pos f2) ||
              (is_neg f1 && is_neg f2) -> [|f1|]
-      | (FP_normal, FP_normal, _, _) | (FP_subnormal, FP_subnormal, _, _)
-        when f1 = f2 -> [|f1|]
+      | (FP_normal | FP_subnormal), _ , _, _ when f1 = f2 -> [|f1|]
       | _, _, _, _ -> begin
         let h = set_header_from_float f1 Header.bottom in
         let h = set_header_from_float f2 h in
