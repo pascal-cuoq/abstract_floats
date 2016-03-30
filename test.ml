@@ -1,5 +1,24 @@
 open Float
 
+let ppa a =
+  Format.asprintf "%a\n" pretty a
+
+let ppf f =
+  Printf.printf "%.16e\n\n" f
+
+let dump_af a =
+  let l = Array.length a in
+  Format.printf "[|";
+  for i = 0 to l - 1 do
+    if i = 0 || l = 2
+    then Format.printf "0x%016Lx" (Int64.bits_of_float a.(i))
+    else Format.printf "%.16e" a.(i);
+    if i < l - 1
+    then Format.printf ","
+  done;
+  Format.printf "|]@\n";
+
+
 module RandomAF = struct
 
   let () = Random.self_init ()
@@ -225,8 +244,10 @@ module TestJoins = struct
 
 end
 
+(*
 let () = TestJoins.test_others ()
 let () = TestJoins.test_rand ()
+*)
 
 module TestSqrt = struct
 
@@ -241,21 +262,17 @@ module TestSqrt = struct
 
 end
 
+(*
 let () = TestSqrt.test_rand ()
+*)
 
 module TestArithmetic = struct
-
-  let ppa a =
-    Format.printf "%a\n" pretty a
-
-  let ppf f =
-    Printf.printf "%.16e\n\n" f
 
   let test op1 op2 a1 a2 =
     let srf = RandomAF.random_select in
     let a12 = op2 a1 a2 in
     assert(Header.check a12);
-    for i = 0 to 1000 do
+    for i = 0 to 100000 do
       let rf1, rf2 = srf a1, srf a2 in
       let rf12 = op1 rf1 rf2 in
       if not (float_in_abstract_float rf12 a12)
@@ -269,7 +286,7 @@ module TestArithmetic = struct
 
   let test_rand () =
     print_endline "Arithmetic: start random tests";
-    for i = 0 to 100 do
+    for i = 0 to 10 do
       let a1, a2 = RandomAF.random_AF_pair () in
       test ( +. ) add a1 a2;
       test ( -. ) sub a1 a2;
@@ -281,12 +298,12 @@ module TestArithmetic = struct
 
 end
 
+(*
 let () = TestArithmetic.test_rand ()
+*)
 
 module TestPretty = struct
 
-  let ppa a =
-    Format.asprintf "%a\n" pretty a
 
   let test_rand () =
     print_endline "Pretty: start random tests";
@@ -298,5 +315,30 @@ module TestPretty = struct
 
 end
 
+(*
 let () = TestPretty.test_rand ()
+*)
 
+module TestReverseAdd = struct
+
+  let test () =
+    let a, b = RandomAF.random_AF_pair () in
+    let x = RandomAF.random_abstract_float () in
+    let nx = reverse_add x a b in
+    print_endline (String.make 15 '-');
+    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
+      pretty a pretty b pretty x;
+    assert(Header.check nx);
+    Format.printf "x': %a\n" pretty nx;
+    if (not (is_included nx x)) then begin
+      dump_af x; dump_af nx; assert false
+    end else ()
+
+  let test_rand () =
+    for i = 0 to 1_000_000 do
+      test ()
+    done
+
+end
+
+let () = TestReverseAdd.test_rand ()
