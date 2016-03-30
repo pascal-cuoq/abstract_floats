@@ -69,6 +69,19 @@ let is_pos_zero f = Int64.bits_of_float f = 0L
 
 let is_neg_zero f = Int64.bits_of_float f = sign_bit
 
+let dump_internal a =
+  let l = Array.length a in
+  Format.printf "[|";
+  for i = 0 to l-1 do
+    if i = 0 || l = 2
+    then Format.printf "0x%016Lx" (Int64.bits_of_float a.(i))
+    else Format.printf "%.16e" a.(i);
+    if i < l-1
+    then Format.printf ","
+  done;
+  Format.printf "|]@\n";
+
+
 (*
              ***** UNITY OF REPRESENTATION *****
 
@@ -1149,7 +1162,9 @@ let join (a1:abstract_float) (a2: abstract_float) : abstract_float =
     (* both [a1] and [a2] are singletons *)
       let f1, f2 = a1.(0), a2.(0) in
       match classify_float f1, classify_float f2, f1, f2 with
-      | FP_nan, FP_nan, _, _ -> abstract_all_NaNs
+      | FP_nan, FP_nan, _, _ ->
+        if Int64.bits_of_float f1 = Int64.bits_of_float f2 then
+          inject_float f1 else abstract_all_NaNs
       | FP_nan, _, theNaN, nonNaN | _, FP_nan, nonNaN, theNaN ->
         let h = Header.(of_flag at_least_one_NaN) in
         let h = set_header_from_float nonNaN h in
@@ -1555,7 +1570,6 @@ let add_expanded a1 a2 =
    from [a1] to a value from [a2]. *)
 let add = binop (fun r a1 a2 -> r.(0) <- a1.(0) +. a2.(0)) add_expanded
 
-
 let sub a1 a2 = add a1 (neg a2)
 
 let mult_expanded a1 a2 =
@@ -1796,12 +1810,26 @@ let top () =
   a
 
 let narrow_pos_range a pl pu =
-  let t = top () in set_pos t pl pu;
-  meet a t
+  if is_singleton a then a else
+  if Header.(test (of_abstract_float a) positive_normalish) then begin
+    let a = Array.copy a in
+    let al, au = (-. (get_opp_pos_lower a)), get_pos_upper a in
+    if al <= pu && pu <= au then set_pos_upper a pu;
+    if al <= pl && pl <= au then set_pos_lower a pl;
+    a
+  end
+  else a
 
 let narrow_neg_range a nl nu =
-  let t = top () in set_neg t nl nu;
-  meet a t
+  if is_singleton a then a else
+  if Header.(test (of_abstract_float a) negative_normalish) then begin
+    let a = Array.copy a in
+    let al, au = (-. (get_opp_neg_lower a)), get_neg_upper a in
+    if al <= nu && nu <= au then set_neg_upper a au;
+    if al <= nl && nl <= au then set_neg_lower a al;
+    a
+  end
+  else a
 
 let narrow_range a l u =
   if l = 0. && u = 0. then a else
@@ -1816,12 +1844,18 @@ let narrow_range a l u =
 
 (* *** Backwards functions *** *)
 
+let debug = false
+
 (* The set of values x such that x + a == b *)
 let reverse_add x a b =
   let a = if is_singleton a then expand a else a in
   let b = if is_singleton b then expand b else b in
   let h1, h2 = Header.(of_abstract_float a, of_abstract_float b) in
   let h = Header.reverse_add h1 h2 in
+  if debug then begin
+    Format.printf "REVERSE_ADD HEADER: ";
+    dump_internal (Header.allocate_abstract_float h);
+    Format.printf "-------------\n" end;
   if Header.is_top h then x else begin
     (* D3 *)
     let pos_overflow =
@@ -1898,12 +1932,34 @@ let reverse_add x a b =
         | Empty, _ -> None
       end
       else None in
+    let i = ref 0 in
     let narrow x = function
-      | Some (l, u) -> join x (narrow_range x l u)
-      | None -> x in
-    List.fold_left narrow x
+      | Some (l, u) ->
+        let nx = narrow_range x l u in
+        if debug then begin
+        Format.printf "time: %d\n" !i;
+        Format.printf "l: %.16e\n" l;
+        Format.printf "u: %.16e\n" u;
+        Format.printf "ORINGAL  X: "; dump_internal x;
+        Format.printf "NARROWED X: "; dump_internal nx end;
+        incr i;
+        nx
+      | None -> incr i; x in
+    let xs =
+      List.map (fun r -> narrow x r)
       [pos_overflow; neg_overflow; both_inf; zero_pos; zero_neg;
-       papb; nanb; panb; napb]
+       papb; nanb; panb; napb] in
+    match xs with
+    | hd :: tl -> List.fold_left
+                    (fun cur x ->
+                       let jx = join cur x in
+                       if debug then begin
+                       Format.printf "%s\n" (String.make 10 '~');
+                       Format.printf "CUR X   : "; dump_internal cur;
+                       Format.printf "NARROW X: "; dump_internal x;
+                       Format.printf "JOINED X: "; dump_internal jx end;
+                       jx) hd tl
+    | _ -> assert false
   end
 
 (* The set of values x such that x * a == b *)

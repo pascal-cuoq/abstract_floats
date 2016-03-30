@@ -321,15 +321,18 @@ let () = TestPretty.test_rand ()
 
 module TestReverseAdd = struct
 
+  let debug = false
+
   let test () =
     let a, b = RandomAF.random_AF_pair () in
     let x = RandomAF.random_abstract_float () in
     let nx = reverse_add x a b in
+    if debug then begin
     print_endline (String.make 15 '-');
     Format.printf "a:  %a\nb:  %a\nx:  %a\n"
-      pretty a pretty b pretty x;
+      pretty a pretty b pretty x end;
     assert(Header.check nx);
-    Format.printf "x': %a\n" pretty nx;
+    if debug then Format.printf "x': %a\n" pretty nx;
     if (not (is_included nx x)) then begin
       dump_af x; dump_af nx; assert false
     end else ()
@@ -338,6 +341,45 @@ module TestReverseAdd = struct
     for i = 0 to 1_000_000 do
       test ()
     done
+
+
+  (* bug in join: joining two single NaNs *)
+  let test_bug1 () =
+    let a = [| 0.0 |] in
+    let b =
+      let h = Header.(set_all_NaNs bottom) in
+      let h = Header.(set_flag h positive_inf) in
+      let h = Header.(set_flag h negative_inf) in
+      let h = Header.(set_flag h negative_normalish) in
+      let a = Header.allocate_abstract_float h in
+      set_neg a (-5.) (-4.);
+      a in
+    let x = [| Int64.float_of_bits 0x7ff0000024560001L |] in
+    let nx = reverse_add x a b in
+    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
+      pretty a pretty b pretty x;
+    assert(Header.check nx);
+    Format.printf "x': %a\n" pretty nx;
+    if (not (is_included nx x)) then begin
+      dump_af x; dump_af nx; assert false
+    end else ()
+
+  (* bug in narrow_range: should not use meet *)
+  let test_bug2 () =
+    let a = [|1.|] in
+    let h = Header.(set_all_NaNs bottom) in
+    let h = Header.(set_flag h positive_normalish) in
+    let b = Header.allocate_abstract_float h in
+    set_pos b 2. 3.;
+    let x = [| 1.8401032236488259e-308 |] in
+    let nx = reverse_add x a b in
+    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
+      pretty a pretty b pretty x;
+    assert(Header.check nx);
+    Format.printf "x': %a\n" pretty nx;
+    if (not (is_included nx x)) then begin
+      dump_af x; dump_af nx; assert false
+    end else ()
 
 end
 
