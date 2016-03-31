@@ -649,7 +649,7 @@ end = struct
     if get_NaN_part h1 <> 0 && get_NaN_part h2 <> 0 then top
     else begin
       let h =
-        if get_NaN_part h2 <> 0 then of_flag all_NaNs else of_flag bottom in
+        if get_NaN_part h2 <> 0 then of_flag all_NaNs else bottom in
       let h =
         if get_NaN_part h2 <> 0 then begin
           let h = if test h1 negative_inf
@@ -1292,10 +1292,10 @@ let meet a1 a2 =
     | (true, Header.No_NaN, Some (l, u), None |
        true, Header.No_NaN, None, Some (l, u)) when l = u -> [| l |]
     | _, Header.No_NaN, None, None -> begin
-      if Header.(is_exactly h positive_zero) then [| 0. |] else
-      if Header.(is_exactly h negative_zero) then [| -0. |] else
-      if Header.(is_exactly h positive_inf) then [| infinity |] else
-      if Header.(is_exactly h negative_inf) then [| neg_infinity |] else begin
+      if Header.(is_exactly h positive_zero) then zero else
+      if Header.(is_exactly h negative_zero) then neg_zero else
+      if Header.(is_exactly h positive_inf) then abstract_infinity else
+      if Header.(is_exactly h negative_inf) then abstract_neg_infinity else begin
         Header.allocate_abstract_float h
       end
       end
@@ -1421,7 +1421,7 @@ let expand =
     else if a = neg_infinity then exp_neg_infinity
     else if a <> a then
         Header.(allocate_abstract_float_with_NaN
-                (set_flag bottom at_least_one_NaN)
+                (of_flag at_least_one_NaN)
                 (One_NaN (Int64.bits_of_float a)))
     else
       let repr = Int64.bits_of_float a in
@@ -1794,11 +1794,11 @@ end = struct
     | Empty, r | r, Empty -> r
     | Range (l1, u1), Range (l2, u2) ->
       Range (min l1 l2, max u1 u2)
-    | Range (l, u), Single n | Single n, Range (l, u) ->
+    | Range (l, u) as r, Single n | Single n, (Range (l, u) as r) ->
       if n < l then Range (n, u) else
-      if n > u then Range (l, n) else Range (l, u)
+      if n > u then Range (l, n) else r
     | Single n1, Single n2 ->
-      if n1 = n2 then Single n1 else
+      if n1 = n2 then t1 else
       if n1 > n2 then Range (n2, n1) else Range (n1, n2)
 
 end
