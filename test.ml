@@ -18,7 +18,6 @@ let dump_af a =
   done;
   Format.printf "|]@\n";
 
-
 module RandomAF = struct
 
   let () = Random.self_init ()
@@ -197,11 +196,29 @@ module RandomAF = struct
 
 end
 
+module TestNeg = struct
+
+  let test () =
+    let a = RandomAF.random_abstract_float () in
+    let f = RandomAF.random_select a in
+    let nf = (-. f) in
+    let na = neg a in
+    assert(float_in_abstract_float nf na)
+
+  let test_rand () =
+    print_endline "Neg: start random tests";
+    for i = 0 to 1_000_000 do
+      test ()
+    done;
+    print_endline "Neg: random tests successful"
+
+end
+
 module TestJoins = struct
 
   let test_rand () =
     print_endline "Join: start random tests";
-    for i = 0 to 10000 do
+    for i = 0 to 100000 do
       let a1, a2 = RandomAF.random_AF_pair () in
       let a12 = join a1 a2 in
       let a21 = join a2 a1 in
@@ -211,7 +228,7 @@ module TestJoins = struct
       assert(is_included a1 a12);
       assert(is_included a2 a12);
     done;
-    for i = 0 to 1000 do
+    for i = 0 to 100 do
       let a1 = RandomAF.random_abstract_float () in
       let f = RandomAF.random_select a1 in
       assert (float_in_abstract_float f a1)
@@ -244,10 +261,26 @@ module TestJoins = struct
 
 end
 
-(*
 let () = TestJoins.test_others ()
 let () = TestJoins.test_rand ()
-*)
+
+module TestMeet = struct
+
+  let test () =
+    let a1, a2 = RandomAF.random_AF_pair () in
+    let ma = meet a1 a2 in
+    assert(is_included ma a1 && is_included ma a2)
+
+  let test_rand () =
+    print_endline "Meet: start random tests";
+    for i = 0 to 1_000_00 do
+      test ()
+    done;
+    print_endline "Meet: random tests successful"
+
+end
+
+let () = TestMeet.test_rand ()
 
 module TestSqrt = struct
 
@@ -262,9 +295,7 @@ module TestSqrt = struct
 
 end
 
-(*
 let () = TestSqrt.test_rand ()
-*)
 
 module TestArithmetic = struct
 
@@ -298,12 +329,9 @@ module TestArithmetic = struct
 
 end
 
-(*
 let () = TestArithmetic.test_rand ()
-*)
 
 module TestPretty = struct
-
 
   let test_rand () =
     print_endline "Pretty: start random tests";
@@ -311,13 +339,11 @@ module TestPretty = struct
       let a1 = RandomAF.random_abstract_float () in
       ignore (ppa a1)
     done;
-    print_endline "Pretty: random tests successful";
+    print_endline "Pretty: random tests successful"
 
 end
 
-(*
 let () = TestPretty.test_rand ()
-*)
 
 module TestReverseAdd = struct
 
@@ -338,10 +364,11 @@ module TestReverseAdd = struct
     end else ()
 
   let test_rand () =
-    for i = 0 to 1_000_000 do
+    print_endline "ReverseAdd: start random tests";
+    for i = 0 to 3_000_000 do
       test ()
-    done
-
+    done;
+    print_endline "ReverseAdd: random tests successful"
 
   (* bug in join: joining two single NaNs *)
   let test_bug1 () =
