@@ -1688,6 +1688,8 @@ module Dichotomy : sig
 
   val range : float -> float -> t
 
+  val dump : float -> float -> (float * float * float * float)
+
   val normalize : t -> (float * float) option
 
   val combine : t -> t -> t
@@ -1749,10 +1751,15 @@ end = struct
   let neg_cp = -9.9792015476736e+291
 
   let dump a b =
-    Printf.printf "upper_neg : %.16e\n" (upper_neg a b);
-    Printf.printf "lower_neg : %.16e\n" (lower_neg a b);
-    Printf.printf "upper_pos : %.16e\n" (upper_pos a b);
-    Printf.printf "lower_pos : %.16e\n" (lower_pos a b)
+    let un = upper_neg a b in
+    let ln = lower_neg a b in
+    let up = upper_pos a b in
+    let lp = lower_pos a b in
+    Printf.printf "upper_neg : %.16e\n" un;
+    Printf.printf "lower_neg : %.16e\n" ln;
+    Printf.printf "upper_pos : %.16e\n" up;
+    Printf.printf "lower_pos : %.16e\n" lp;
+    un, ln, up, lp
 
   let range a b =
     try begin
@@ -1760,14 +1767,14 @@ end = struct
       if a = b then
         lower_neg a b, upper_pos a b else
       if a < b then begin
-        if a +. max_float < b then raise Not_found else
+        if a +. max_float < b then (print_endline "nf"; raise Not_found) else
         if b = infinity then
           fsucc (lower_pos a infinity), max_float
         else
           fsucc (lower_pos a b), upper_pos a b
       end
       else begin
-        if a -. max_float > b then raise Not_found else
+        if a -. max_float > b then (print_endline "nf"; raise Not_found) else
         if b = neg_infinity then
           (-.max_float), fsucc (upper_neg a neg_infinity)
         else
