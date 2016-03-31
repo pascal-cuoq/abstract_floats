@@ -365,7 +365,7 @@ module TestReverseAdd = struct
 
   let test_rand () =
     print_endline "ReverseAdd: start random tests";
-    for i = 0 to 3_000_000 do
+    for i = 0 to 100000 do
       test ()
     done;
     print_endline "ReverseAdd: random tests successful"

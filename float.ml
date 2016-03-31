@@ -649,7 +649,7 @@ end = struct
     if get_NaN_part h1 <> 0 && get_NaN_part h2 <> 0 then top
     else begin
       let h =
-        if get_NaN_part h2 <> 0 then of_flag all_NaNs else bottom in
+        if get_NaN_part h2 <> 0 then of_flag all_NaNs else of_flag bottom in
       let h =
         if get_NaN_part h2 <> 0 then begin
           let h = if test h1 negative_inf
@@ -1292,10 +1292,10 @@ let meet a1 a2 =
     | (true, Header.No_NaN, Some (l, u), None |
        true, Header.No_NaN, None, Some (l, u)) when l = u -> [| l |]
     | _, Header.No_NaN, None, None -> begin
-      if Header.(is_exactly h positive_zero) then zero else
-      if Header.(is_exactly h negative_zero) then neg_zero else
-      if Header.(is_exactly h positive_inf) then abstract_infinity else
-      if Header.(is_exactly h negative_inf) then abstract_neg_infinity else begin
+      if Header.(is_exactly h positive_zero) then [| 0. |] else
+      if Header.(is_exactly h negative_zero) then [| -0. |] else
+      if Header.(is_exactly h positive_inf) then [| infinity |] else
+      if Header.(is_exactly h negative_inf) then [| neg_infinity |] else begin
         Header.allocate_abstract_float h
       end
       end
@@ -1421,7 +1421,7 @@ let expand =
     else if a = neg_infinity then exp_neg_infinity
     else if a <> a then
         Header.(allocate_abstract_float_with_NaN
-                (of_flag at_least_one_NaN)
+                (set_flag bottom at_least_one_NaN)
                 (One_NaN (Int64.bits_of_float a)))
     else
       let repr = Int64.bits_of_float a in
@@ -1688,8 +1688,6 @@ module Dichotomy : sig
 
   val range : float -> float -> t
 
-  val dump : float -> float -> (float * float * float * float)
-
   val normalize : t -> (float * float) option
 
   val combine : t -> t -> t
@@ -1751,15 +1749,10 @@ end = struct
   let neg_cp = -9.9792015476736e+291
 
   let dump a b =
-    let un = upper_neg a b in
-    let ln = lower_neg a b in
-    let up = upper_pos a b in
-    let lp = lower_pos a b in
-    Printf.printf "upper_neg : %.16e\n" un;
-    Printf.printf "lower_neg : %.16e\n" ln;
-    Printf.printf "upper_pos : %.16e\n" up;
-    Printf.printf "lower_pos : %.16e\n" lp;
-    un, ln, up, lp
+    Printf.printf "upper_neg : %.16e\n" (upper_neg a b);
+    Printf.printf "lower_neg : %.16e\n" (lower_neg a b);
+    Printf.printf "upper_pos : %.16e\n" (upper_pos a b);
+    Printf.printf "lower_pos : %.16e\n" (lower_pos a b)
 
   let range a b =
     try begin
@@ -1767,14 +1760,14 @@ end = struct
       if a = b then
         lower_neg a b, upper_pos a b else
       if a < b then begin
-        if a +. max_float < b then (print_endline "nf"; raise Not_found) else
+        if a +. max_float < b then raise Not_found else
         if b = infinity then
           fsucc (lower_pos a infinity), max_float
         else
           fsucc (lower_pos a b), upper_pos a b
       end
       else begin
-        if a -. max_float > b then (print_endline "nf"; raise Not_found) else
+        if a -. max_float > b then raise Not_found else
         if b = neg_infinity then
           (-.max_float), fsucc (upper_neg a neg_infinity)
         else
@@ -1801,11 +1794,11 @@ end = struct
     | Empty, r | r, Empty -> r
     | Range (l1, u1), Range (l2, u2) ->
       Range (min l1 l2, max u1 u2)
-    | Range (l, u) as r, Single n | Single n, (Range (l, u) as r) ->
+    | Range (l, u), Single n | Single n, Range (l, u) ->
       if n < l then Range (n, u) else
-      if n > u then Range (l, n) else r
+      if n > u then Range (l, n) else Range (l, u)
     | Single n1, Single n2 ->
-      if n1 = n2 then t1 else
+      if n1 = n2 then Single n1 else
       if n1 > n2 then Range (n2, n1) else Range (n1, n2)
 
 end
