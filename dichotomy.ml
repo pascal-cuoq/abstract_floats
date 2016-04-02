@@ -90,3 +90,5 @@ let range a b =
   with _ -> begin
     Empty
   end
+
+let r a b = range a b |> to_string

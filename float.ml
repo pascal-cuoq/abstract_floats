@@ -1857,7 +1857,7 @@ let reverse_add x a b =
     dump_internal (Header.allocate_abstract_float h);
     Format.printf "-------------\n" end;
   if Header.is_top h then x else begin
-    (* D3 *)
+    (* D3, bugged *)
     let pos_overflow =
       if Header.(test h1 positive_normalish &&
                  test h2 positive_inf) then
@@ -1869,7 +1869,7 @@ let reverse_add x a b =
           | Dichotomy.Single n -> Some (n, max_float)
           | Dichotomy.Empty -> None
       else None in
-    (* E4 *)
+    (* E4, bugged *)
     let neg_overflow =
       if Header.(test h1 negative_normalish &&
                  test h2 negative_normalish) then
@@ -1933,20 +1933,21 @@ let reverse_add x a b =
       end
       else None in
     let i = ref 0 in
-    let narrow x = function
-      | Some (l, u) ->
-        let nx = narrow_range x l u in
-        if debug then begin
-        Format.printf "time: %d\n" !i;
-        Format.printf "l: %.16e\n" l;
-        Format.printf "u: %.16e\n" u;
-        Format.printf "ORINGAL  X: "; dump_internal x;
-        Format.printf "NARROWED X: "; dump_internal nx end;
-        incr i;
-        nx
-      | None -> incr i; x in
-    let xs =
-      List.map (fun r -> narrow x r)
+    let narrow x (l, u) =
+      let nx = narrow_range x l u in
+      if debug then begin
+      Format.printf "pass: %d\n" !i;
+      Format.printf "l: %.16e\n" l;
+      Format.printf "u: %.16e\n" u;
+      Format.printf "ORINGAL  X: "; dump_internal x;
+      Format.printf "NARROWED X: "; dump_internal nx end;
+      incr i;
+      nx in
+    let rec reduced acc = function
+      | [] -> acc
+      | Some r :: tl -> reduced ((narrow x r) :: acc) tl
+      | None :: tl -> reduced acc tl in
+    let xs = reduced []
       [pos_overflow; neg_overflow; both_inf; zero_pos; zero_neg;
        papb; nanb; panb; napb] in
     match xs with
@@ -1959,8 +1960,11 @@ let reverse_add x a b =
                        Format.printf "NARROW X: "; dump_internal x;
                        Format.printf "JOINED X: "; dump_internal jx end;
                        jx) hd tl
-    | _ -> assert false
+    | _ -> x
   end
+
+(* The set of values x such that x - a == b *)
+let reverse_sub x a b = reverse_add x (neg a) b
 
 (* The set of values x such that x * a == b *)
 let reverse_mult a b =

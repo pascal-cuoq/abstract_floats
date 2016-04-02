@@ -1,10 +1,10 @@
 open Float
 
-let ppa a =
-  Format.asprintf "%a\n" pretty a
+let ppa fmt a =
+  Format.fprintf fmt "%a\n" pretty a
 
-let ppf f =
-  Printf.printf "%.16e\n\n" f
+let ppf fmt f =
+  Format.fprintf fmt "%.16e" f
 
 let dump_af a =
   let l = Array.length a in
@@ -101,7 +101,7 @@ module RandomAF = struct
     let l, u = random_pos_range () in
     (-.u, -.l)
 
-  let random_abstract_float () =
+  let abstract_float () =
     shuffle_flags ();
     match Random.int 5 with
     | 0 -> let f = random_float () in
@@ -146,7 +146,7 @@ module RandomAF = struct
         set_neg a l u; a
       end
 
-  let random_select (a:abstract_float) : float =
+  let select (a:abstract_float) : float =
     match Array.length a with
     | 1 -> a.(0)
     | _ ->
@@ -186,21 +186,148 @@ module RandomAF = struct
 
   let test_validity () =
     for i = 0 to 1_000_000_000 do
-      assert(Header.check (random_abstract_float ()))
+      assert(Header.check (abstract_float ()))
     done;
     print_endline "RandomAF checked"
 
-  let random_AF_pair () =
-    let af = random_abstract_float () in
-    if Random.int 20 < 1 then af, af else af, random_abstract_float ()
+  let pair () =
+    let af = abstract_float () in
+    if Random.int 20 < 1 then af, af else af, abstract_float ()
+
+  let pos_range a =
+    (-. get_opp_pos_lower a), get_pos_upper a
+
+  let neg_range a =
+    (-. get_opp_neg_lower a), get_pos_upper a
+
+  (* for pos *)
+  let random_float l u =
+    Int64.(float_of_bits (add (bits_of_float l)
+      (Random.int64 (succ (sub (bits_of_float u) (bits_of_float l))))))
+
+  let fsucc_ f = Int64.(float_of_bits @@ succ @@ bits_of_float f)
+  let fpred_ f = Int64.(float_of_bits @@ pred @@ bits_of_float f)
+
+  let fsucc f = if is_pos f then fsucc_ f else fpred_ f
+  let fpred f = if is_pos f then fpred_ f else fsucc_ f
+
+  let random_float_without_f l u f =
+    if f < l || f > u then Some (fun () -> random_float l u) else begin
+      if l = u then None else
+      if l = f then Some (fun () -> random_float (fsucc f) u) else
+      if u = f then Some (fun () -> random_float l (fpred f)) else
+        Some (fun () ->
+            if Random.bool () then random_float l (fpred f) else
+              random_float (fsucc f) u)
+    end
+
+  let random_float_without_range l u l1 u1 =
+    if u1 < l || l1 > u then Some (fun () -> random_float l u) else begin
+      if l = u then None else
+      if l1 <= l then
+        let u1s = fsucc u1 in
+        if u1s > u then None else
+          Some (fun () -> random_float (fsucc u1) u) else
+      if u1 >= u then
+        let l1p = fpred l1 in
+        if l1p < l then None else Some (fun () -> random_float l l1p)
+      else
+        Some (fun () ->
+            if Random.bool () then random_float l (fpred l1)
+            else random_float (fsucc u1) u)
+    end
+
+  let diff_selector x nx =
+    if is_singleton x then
+      let f = Array.get x 0 in
+      if Array.length nx = 2 then
+        let h = Header.of_abstract_float nx in
+        if Header.is_bottom h then
+          Some (fun () -> f)
+        else
+          None
+      else None
+    else begin
+      let h = Header.of_abstract_float x in
+      let p =
+        if Header.(test h positive_normalish) then
+          let l, u = pos_range x in
+          if is_singleton nx then
+            let f = Array.get nx 0 in
+            match classify_float f with
+            | FP_normal | FP_subnormal ->
+              random_float_without_f l u f
+            | _ -> Some (fun () -> random_float l u)
+          else
+            let nh = Header.of_abstract_float nx in
+            if not Header.(test nh positive_normalish) then
+              Some (fun () -> random_float l u)
+            else
+              let ln, un = pos_range nx in
+              random_float_without_range l u ln un
+        else None in
+      let n =
+        if Header.(test h negative_normalish) then
+          let l, u = neg_range x in
+          if is_singleton nx then
+            let f = Array.get nx 0 in
+            match classify_float f with
+            | FP_normal | FP_subnormal ->
+              random_float_without_f l u f
+            | _ -> Some (fun () -> random_float l u)
+          else
+            let nh = Header.of_abstract_float nx in
+            if not Header.(test nh negative_normalish) then
+              Some (fun () -> random_float l u)
+            else None
+        else None in
+      let select_header p f =
+        if Header.(test h p) then
+          if is_singleton nx then
+            if nx.(0) <> f then Some (fun () -> f) else None
+          else
+            let nh = Header.of_abstract_float nx in
+            if Header.(test nh p) then None else Some (fun () -> f)
+        else None in
+      let pz, nz, pinf, ninf =
+        select_header Header.positive_zero 0.0,
+        select_header Header.negative_zero (-0.0),
+        select_header Header.positive_inf infinity,
+        select_header Header.negative_inf neg_infinity in
+      let _NaN =
+        match Header.reconstruct_NaN x with
+        | Header.All_NaN -> begin
+          if is_singleton nx then
+            if classify_float nx.(0) = FP_nan then
+              Some (fun () -> Int64.float_of_bits 0x7FF1234569876222L)
+            else
+              Some (fun () -> random_NaN ())
+          else
+            match Header.reconstruct_NaN nx with
+            | Header.No_NaN -> Some (fun () -> random_NaN ())
+            | Header.All_NaN -> None
+            | Header.One_NaN _ ->
+              Some (fun () ->Int64.float_of_bits 0x7FF1234569876222L)
+          end
+        | _ -> None in
+      let rec filter_map acc = function
+        | [] -> acc
+        | Some x :: tl -> filter_map (x :: acc) tl
+        | None :: tl -> filter_map acc tl in
+      let sources =
+        filter_map [] [p; n; pz; nz; pinf; ninf; _NaN] |> Array.of_list in
+      let len = Array.length sources in
+      if sources = [||] then None else
+        Some (fun () -> Array.get sources (Random.int len) ())
+    end
 
 end
 
 module TestNeg = struct
 
   let test () =
-    let a = RandomAF.random_abstract_float () in
-    let f = RandomAF.random_select a in
+    let a = RandomAF.abstract_float () in
+    let f = RandomAF.select a in
     let nf = (-. f) in
     let na = neg a in
     assert(float_in_abstract_float nf na)
@@ -219,7 +346,7 @@ module TestJoins = struct
   let test_rand () =
     print_endline "Join: start random tests";
     for i = 0 to 100000 do
-      let a1, a2 = RandomAF.random_AF_pair () in
+      let a1, a2 = RandomAF.pair () in
       let a12 = join a1 a2 in
       let a21 = join a2 a1 in
       assert(Header.check a12);
@@ -229,8 +356,8 @@ module TestJoins = struct
       assert(is_included a2 a12);
     done;
     for i = 0 to 100 do
-      let a1 = RandomAF.random_abstract_float () in
-      let f = RandomAF.random_select a1 in
+      let a1 = RandomAF.abstract_float () in
+      let f = RandomAF.select a1 in
       assert (float_in_abstract_float f a1)
     done;
     print_endline "Join: random tests successful"
@@ -261,46 +388,42 @@ module TestJoins = struct
 
 end
 
-let () = TestJoins.test_others ()
-let () = TestJoins.test_rand ()
 
 module TestMeet = struct
 
   let test () =
-    let a1, a2 = RandomAF.random_AF_pair () in
+    let a1, a2 = RandomAF.pair () in
     let ma = meet a1 a2 in
     assert(is_included ma a1 && is_included ma a2)
 
   let test_rand () =
     print_endline "Meet: start random tests";
-    for i = 0 to 1_000_00 do
+    for i = 0 to 1_000_0000 do
       test ()
     done;
     print_endline "Meet: random tests successful"
 
 end
 
-let () = TestMeet.test_rand ()
 
 module TestSqrt = struct
 
   let test_rand () =
     print_endline "Sqrt: start random tests";
     for i = 0 to 1_000_00 do
-      let a = RandomAF.random_abstract_float () in
-      let f1 = RandomAF.random_select a in
+      let a = RandomAF.abstract_float () in
+      let f1 = RandomAF.select a in
       assert (float_in_abstract_float (sqrt f1) (abstract_sqrt a))
     done;
     print_endline "Sqrt: random tests successful"
 
 end
 
-let () = TestSqrt.test_rand ()
 
 module TestArithmetic = struct
 
   let test op1 op2 a1 a2 =
-    let srf = RandomAF.random_select in
+    let srf = RandomAF.select in
     let a12 = op2 a1 a2 in
     assert(Header.check a12);
     for i = 0 to 100000 do
@@ -318,7 +441,7 @@ module TestArithmetic = struct
   let test_rand () =
     print_endline "Arithmetic: start random tests";
     for i = 0 to 10 do
-      let a1, a2 = RandomAF.random_AF_pair () in
+      let a1, a2 = RandomAF.pair () in
       test ( +. ) add a1 a2;
       test ( -. ) sub a1 a2;
       test ( *. ) mult a1 a2;
@@ -329,29 +452,24 @@ module TestArithmetic = struct
 
 end
 
-let () = TestArithmetic.test_rand ()
 
 module TestPretty = struct
 
   let test_rand () =
     print_endline "Pretty: start random tests";
     for i = 0 to 1_000_00 do
-      let a1 = RandomAF.random_abstract_float () in
-      ignore (ppa a1)
+      let a1 = RandomAF.abstract_float () in
+      ignore (Format.asprintf "%a" pretty a1)
     done;
     print_endline "Pretty: random tests successful"
 
 end
 
-let () = TestPretty.test_rand ()
-
 module TestReverseAdd = struct
 
-  let debug = false
+  let debug = true
 
-  let test () =
-    let a, b = RandomAF.random_AF_pair () in
-    let x = RandomAF.random_abstract_float () in
+  let test x a b =
     let nx = reverse_add x a b in
     if debug then begin
     print_endline (String.make 15 '-');
@@ -361,12 +479,30 @@ module TestReverseAdd = struct
     if debug then Format.printf "x': %a\n" pretty nx;
     if (not (is_included nx x)) then begin
       dump_af x; dump_af nx; assert false
-    end else ()
+    end;
+    match RandomAF.diff_selector x nx with
+    | None -> assert (is_included x nx)
+    | Some f -> begin
+        for i = 0 to 100 do
+          let fa, fb = RandomAF.(select a, select b) in
+          let nxf = f () in
+          if nxf +. fa = fb && fb <> infinity then begin
+          Format.printf "%s\n" (String.make 10 '~');
+          Format.printf "x : %a\nx': %a\na : %a\nb : %a\n\n"
+            pretty x pretty nx pretty a pretty b;
+          Format.printf "fx': %a\nfa : %a\nfb : %a\n\n"
+            ppf nxf ppf fa ppf fb;
+          assert false
+          end
+        done
+      end
 
   let test_rand () =
     print_endline "ReverseAdd: start random tests";
     for i = 0 to 100000 do
-      test ()
+      let a, b = RandomAF.pair () in
+      let x = RandomAF.abstract_float () in
+      test x a b
     done;
     print_endline "ReverseAdd: random tests successful"
 
@@ -408,6 +544,33 @@ module TestReverseAdd = struct
       dump_af x; dump_af nx; assert false
     end else ()
 
+  let ntest1 () =
+    let x = top () in
+    let a = inject_float 0.4 in
+    let b = inject_float 1.8 in
+    test x a b
+
+  let ntest2 () =
+    let x = Header.(allocate_abstract_float (of_flag positive_normalish)) in
+    set_pos x 1.0 5.0;
+    let a = inject_float 1.0 in
+    let b = inject_float 11.0 in
+    test x a b
+
 end
 
-let () = TestReverseAdd.test_rand ()
+let test_neg = false
+let test_join = false
+let test_meet = false
+let test_sqrt = false
+let test_arith = false
+let test_pretty = false
+let test_reverse = true
+
+let () = if test_join then
+  (TestJoins.test_others (); TestJoins.test_rand ())
+let () = if test_meet then TestMeet.test_rand ()
+let () = if test_sqrt then TestSqrt.test_rand ()
+let () = if test_arith then TestArithmetic.test_rand ()
+let () = if test_pretty then TestPretty.test_rand ()
+let () = if test_reverse then TestReverseAdd.test_rand ()
