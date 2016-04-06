@@ -6,6 +6,9 @@ let ppa fmt a =
 let ppf fmt f =
   Format.fprintf fmt "%.16e" f
 
+let bits_eq f1 f2 =
+  Int64.bits_of_float f1 = Int64.bits_of_float f2
+
 let dump_af a =
   let l = Array.length a in
   Format.printf "[|";
@@ -73,6 +76,9 @@ module RandomAF = struct
     | _ -> let h = Header.set_all_NaNs h in
       Header.(allocate_abstract_float_with_NaN h All_NaN)
 
+  let fsucc f = Int64.(float_of_bits @@ succ @@ bits_of_float f)
+  let fpred f = Int64.(float_of_bits @@ pred @@ bits_of_float f)
+
   let random_pos_normalish () =
     match Random.int 15 with
     | 0 -> min_float
@@ -81,6 +87,13 @@ module RandomAF = struct
     | 3 | 4 -> Random.float max_float
     | 5 -> Random.float 2e-308
     | 6 -> 2e-308
+    | 7 -> begin
+        match Random.int 3 with
+        | 0 -> Dichotomy.pos_cp
+        | 1 -> fsucc Dichotomy.pos_cp
+        | _ -> fpred Dichotomy.pos_cp
+      end
+    | 9 -> fsucc Dichotomy.pos_cp
     | _ -> Random.float 1_000_00.
 
   let random_float () =
@@ -198,12 +211,22 @@ module RandomAF = struct
     (-. get_opp_pos_lower a), get_pos_upper a
 
   let neg_range a =
-    (-. get_opp_neg_lower a), get_pos_upper a
+    (-. get_opp_neg_lower a), get_neg_upper a
 
   (* for pos *)
   let random_float l u =
+    if l = smallest_neg && u = largest_neg
+      then l +. (Random.float (largest_neg -. l)) else
+    if l = smallest_pos && u = largest_pos
+      then l +. (Random.float (largest_pos -. l)) else
+    try (
     Int64.(float_of_bits (add (bits_of_float l)
-      (Random.int64 (succ (sub (bits_of_float u) (bits_of_float l))))))
+          (Random.int64 (succ (sub (bits_of_float u) (bits_of_float l)))))))
+    with _ -> Format.printf "%a %a\n" ppf l ppf u; assert false
+
+  let random_float l u =
+    if u < 0. then -.(random_float (-.u) (-.l)) else
+      random_float l u
 
   let fsucc_ f = Int64.(float_of_bits @@ succ @@ bits_of_float f)
   let fpred_ f = Int64.(float_of_bits @@ pred @@ bits_of_float f)
@@ -398,7 +421,7 @@ module TestMeet = struct
 
   let test_rand () =
     print_endline "Meet: start random tests";
-    for i = 0 to 1_000_0000 do
+    for i = 0 to 1_000_00 do
       test ()
     done;
     print_endline "Meet: random tests successful"
@@ -452,7 +475,6 @@ module TestArithmetic = struct
 
 end
 
-
 module TestPretty = struct
 
   let test_rand () =
@@ -467,26 +489,29 @@ end
 
 module TestReverseAdd = struct
 
-  let debug = true
+  let debug = false
 
   let test x a b =
-    let nx = reverse_add x a b in
     if debug then begin
-    print_endline (String.make 15 '-');
-    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
-      pretty a pretty b pretty x end;
+      print_endline (String.make 15 '-');
+      Format.printf "a: %a\nb: %a\n" pretty a pretty b;
+      Format.printf "x:  %a\n" pretty x end;
+    let nx = reverse_add x a b in
     assert(Header.check nx);
     if debug then Format.printf "x': %a\n" pretty nx;
     if (not (is_included nx x)) then begin
       dump_af x; dump_af nx; assert false
     end;
     match RandomAF.diff_selector x nx with
-    | None -> assert (is_included x nx)
+    | None ->
+      if not (is_included nx x) then
+        (dump_internal x; dump_internal nx; assert false)
+      else ()
     | Some f -> begin
-        for i = 0 to 100 do
+        for i = 0 to 10000 do
           let fa, fb = RandomAF.(select a, select b) in
           let nxf = f () in
-          if nxf +. fa = fb && fb <> infinity then begin
+          if bits_eq (nxf +. fa) fb then begin
           Format.printf "%s\n" (String.make 10 '~');
           Format.printf "x : %a\nx': %a\na : %a\nb : %a\n\n"
             pretty x pretty nx pretty a pretty b;
@@ -522,7 +547,7 @@ module TestReverseAdd = struct
     Format.printf "a:  %a\nb:  %a\nx:  %a\n"
       pretty a pretty b pretty x;
     assert(Header.check nx);
-    Format.printf "x': %a\n" pretty nx;
+    Format.printf "x': %a\n\n" pretty nx;
     if (not (is_included nx x)) then begin
       dump_af x; dump_af nx; assert false
     end else ()
@@ -544,6 +569,157 @@ module TestReverseAdd = struct
       dump_af x; dump_af nx; assert false
     end else ()
 
+  let test_bug3 () =
+    let ha = Header.(set_all_NaNs (of_flag negative_zero)) in
+    let ha = Header.(set_flag ha positive_normalish) in
+    let a = Header.allocate_abstract_float ha in
+    set_pos a 3.7286649853047806e+04 5.2488920238158935e+04;
+    let hb = Header.(set_flag (of_flag positive_inf) positive_zero) in
+    let hb = Header.(set_flag hb negative_zero) in
+    let hb = Header.(set_flag hb positive_normalish) in
+    let b = Header.allocate_abstract_float hb in
+    set_pos b 6.2039083778571396e+307 1.1710442810843075e+308;
+    let hx =
+      Header.(set_flag (of_flag positive_zero) negative_zero) in
+    let hx =
+      Header.(set_flag hx positive_inf) in
+    let hx =
+      Header.(set_flag hx negative_inf) in
+    let hx = Header.(set_all_NaNs hx) in
+    let x = Header.allocate_abstract_float hx in
+    let nx = reverse_add x a b in
+    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
+      pretty a pretty b pretty x;
+    assert(Header.check nx);
+    Format.printf "x': %a\n" pretty nx;
+    if (not (is_included nx x)) then begin
+      dump_af x; dump_af nx; assert false
+    end else ()
+
+  (* fixed, Header.reverse_add first true branch *)
+  let test_bug4 () =
+    let ha = Header.(set_flag (of_flag negative_inf) positive_zero) in
+    let ha = Header.(set_all_NaNs ha) in
+    let a = Header.allocate_abstract_float ha in
+    let hb = Header.(set_flag (of_flag negative_inf) positive_zero) in
+    let hb = Header.(set_flag hb at_least_one_NaN) in
+    let hb = Header.(set_flag hb positive_normalish) in
+    let b = Header.allocate_abstract_float_with_NaN hb
+        (Header.One_NaN (0xfff0000005743001L)) in
+    set_pos b 2.3072254309300213e+04 3.6047259748806195e+04;
+    let hx = Header.(set_flag (of_flag positive_zero) negative_zero) in
+    let hx = Header.(set_flag hx positive_inf) in
+    let hx = Header.(set_all_NaNs hx) in
+    let hx = Header.(set_flag hx negative_normalish) in
+    let x = Header.allocate_abstract_float hx in
+    set_neg x (-2.5895361791812356e+04) (-1.7694993162971678e+04);
+    let nx = reverse_add x a b in
+    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
+      pretty a pretty b pretty x;
+    assert(Header.check nx);
+    Format.printf "x': %a\n" pretty nx;
+    if (not (is_included nx x)) then begin
+      dump_af x; dump_af nx; assert false
+    end else ()
+
+  (* bug in reverse_add, neg_overflow *)
+  let test_bug5 () =
+    let ha =
+      Header.(of_flags [negative_zero; negative_inf;
+                        at_least_one_NaN; negative_normalish]) in
+    let a = Header.(allocate_abstract_float_with_NaN
+                     ha (One_NaN 0x7ff0000024560001L)) in
+    set_neg a (-1.5108707789796620e+308) (-1.8130866911409611e+307);
+    let hb =
+      Header.(of_flags [positive_zero; positive_inf; negative_inf]) in
+    let hb = Header.(set_all_NaNs hb) in
+    let b = Header.allocate_abstract_float hb in
+    let hx =
+      Header.(of_flags [positive_zero; negative_zero;
+                        positive_inf; negative_normalish;
+                        positive_normalish]) in
+    let x = Header.allocate_abstract_float hx in
+    set_neg x (-4.2308300236767202e+04) (-1.4184781505518549e+04);
+    set_pos x 5.4694215793246267e-309 2.2250738585072014e-308;
+    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
+      pretty a pretty b pretty x;
+    let nx = reverse_add x a b in
+        assert(Header.check nx);
+    Format.printf "x': %a\n" pretty nx;
+    if (not (is_included nx x)) then begin
+      dump_af x; dump_af nx; assert false
+    end else ()
+
+  (* fixed in fold_range *)
+  let test_bug6 () =
+    let ha = Header.(set_flag (of_flag positive_inf) positive_normalish) in
+    let a = Header.allocate_abstract_float ha in
+    set_pos a 2.0677600541151282e+04 9.7177780825627851e+04;
+    let hb =
+      Header.(of_flags [negative_zero; positive_zero;
+                        positive_inf; positive_normalish]) in
+    let hb = Header.(set_all_NaNs hb) in
+    let b = Header.allocate_abstract_float hb in
+    set_pos b 1.1185516275125372e-308 1.1844009154295606e-308;
+    let hx = Header.(set_all_NaNs (of_flags [positive_zero;
+                                             negative_normalish])) in
+    let x = Header.allocate_abstract_float hx in
+    set_neg x (-2.6989508761250097e+04) (-3.9173820305161257e+03);
+    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
+      pretty a pretty b pretty x;
+    let nx = reverse_add x a b in
+        assert(Header.check nx);
+    Format.printf "x': %a\n" pretty nx;
+    if (not (is_included nx x)) then begin
+      dump_af x; dump_af nx; assert false
+    end else ()
+
+  let test_bug7 () =
+    let ha = Header.(set_all_NaNs (of_flag positive_zero)) in
+    let hb = Header.(of_flags [negative_zero; positive_inf; negative_inf]) in
+    let hx = Header.(of_flags [negative_zero; positive_inf]) in
+    let hx = Header.(set_flag hx at_least_one_NaN) in
+    let x = Header.(allocate_abstract_float_with_NaN
+                      hx (One_NaN 0x7ff0000024560001L)) in
+    let a = Header.allocate_abstract_float ha in
+    let b = Header.allocate_abstract_float hb in
+    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
+      pretty a pretty b pretty x;
+    let nx = reverse_add x a b in
+        assert(Header.check nx);
+    Format.printf "x': %a\n" pretty nx;
+    if (not (is_included nx x)) then begin
+      dump_af x; dump_af nx; assert false
+    end else ();
+    test x a b
+
+  (* fix range combine, fix zero setting *)
+  let test_bug8 () =
+    let x = inject_float 0.0 in
+    let a = inject_float 2.2250738585072014e-308 in
+    let b = inject_float 2.2250738585072014e-308 in
+    test x a b
+
+  let test_bug9 () =
+    let hx = Header.(of_flag positive_normalish) in
+    let x = Header.allocate_abstract_float hx in
+    set_pos x 3.0707164255425355e+03 7.8646307536638469e+03;
+    let ha = Header.(set_flag (of_flag positive_normalish) positive_zero) in
+    let a = Header.allocate_abstract_float ha in
+    let b = Header.allocate_abstract_float ha in
+    set_pos a 9.9928593609454120e+305 4.1172212759061929e+306;
+    set_pos b 9.9928593609454120e+305 4.1172212759061929e+306;
+    test x a b
+
+  let test_bug10 () =
+    let x = inject_float 1.0 in
+    let h = Header.(of_flag positive_normalish) in
+    let a = Header.allocate_abstract_float h in
+    let b = Header.allocate_abstract_float h in
+    set_pos a 0.4 1.8;
+    set_pos b 0.4 1.8;
+    test x a b
+
   let ntest1 () =
     let x = top () in
     let a = inject_float 0.4 in
@@ -556,10 +732,40 @@ module TestReverseAdd = struct
     let a = inject_float 1.0 in
     let b = inject_float 11.0 in
     test x a b
+  
+  let test_norm_all () =
+    test_bug1 ();
+    test_bug2 ();
+    ntest1 ();
+    ntest2 ()
 
 end
 
-let test_neg = false
+(*
+let test_neg = true
+let test_join = true
+let test_meet = true
+let test_sqrt = true
+let test_arith = true
+let test_pretty = true
+*)
+
+let test_other () =
+  let h = Header.(set_flag (of_flag negative_normalish) negative_zero) in
+  let h = Header.(set_all_NaNs h) in
+  let a = Header.allocate_abstract_float h in
+  let b = Header.allocate_abstract_float h in
+  set_neg a (-3.6330785545677325e+04) (-7.0799234305157606e+03);
+  set_neg b (-3.6330785545677325e+04) (-3.6330785545677325e+04);
+  assert(is_included b a)
+
+let test_other1 () =
+  let hx = Header.(of_flags [negative_zero; positive_inf; at_least_one_NaN]) in
+  let nhx = Header.(of_flags [negative_zero; positive_inf]) in
+  let x = Header.(allocate_abstract_float_with_NaN hx (One_NaN 0x7ff1234569876121L)) in
+  let nx = Header.allocate_abstract_float nhx in
+  assert(is_included nx x)
+
 let test_join = false
 let test_meet = false
 let test_sqrt = false
@@ -573,4 +779,8 @@ let () = if test_meet then TestMeet.test_rand ()
 let () = if test_sqrt then TestSqrt.test_rand ()
 let () = if test_arith then TestArithmetic.test_rand ()
 let () = if test_pretty then TestPretty.test_rand ()
-let () = if test_reverse then TestReverseAdd.test_rand ()
+
+let () =
+  if test_reverse then begin
+    TestReverseAdd.test_rand ()
+  end

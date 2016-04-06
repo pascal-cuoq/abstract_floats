@@ -1,5 +1,6 @@
 open Dichotomy
 
+(*
 let max3 = max_float /. 3.
 
 let check_invariant a b =
@@ -61,7 +62,9 @@ let random_pos () =
   | 5 -> Random.float 2e-308
   | 6 -> 2e-308
   | 7 | 8 | 9 -> Random.float 100.
+(*
   | 11 | 12 -> 0.0
+*)
   | 13 -> max_float /. 2.
   | 14 -> max_float /. 3.
   | 15 | 16 -> (float_of_int @@ Random.int 100) /. 10.
@@ -80,5 +83,40 @@ let random_test () =
     test f1 f2
   done
 
+(*
 let () = normal_test ()
 let () = random_test ()
+*)
+
+let rtest1 () =
+  let test () =
+    let l = random_pos () in
+    let u = l +. Random.float (max_float -. l) in
+    let x = upper_pos l u in
+    if l +. x <= u then () else (Printf.printf "%.16e %.16e\n" l u; assert false);
+    if l +. (fsucc x) > u then () else (Printf.printf "%.16e %.16e\n" l u; assert false) in
+  for i = 0 to 1000000000 do
+    test ()
+  done
+
+let chech2 l u =
+  let x = fsucc @@ upper_neg u l in
+  if l +. x <= u then () else (Printf.printf "%.16e %.16e\n" u l; assert false);
+  if l +. (fpred x) > u then () else (Printf.printf "%.16e %.16e\n" u l; assert false)
+
+let rtest2 () =
+  let test () =
+    let l = random_pos () in
+    let u = l +. Random.float (max_float -. l) in
+    let x = fsucc @@ upper_neg u l in
+    if l +. x <= u then () else (Printf.printf "%.16e %.16e\n" u l; assert false);
+    if l +. (fpred x) > u then () else (Printf.printf "%.16e %.16e\n" u l; assert false) in
+  for i = 0 to 1000000000 do
+    test ()
+  done
+
+
+let () = rtest2 ()
+*)
+
+(* {0.4 ... 1.8} {0.4 ... 1.8} *)
