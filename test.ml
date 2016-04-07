@@ -449,7 +449,7 @@ module TestArithmetic = struct
     let srf = RandomAF.select in
     let a12 = op2 a1 a2 in
     assert(Header.check a12);
-    for i = 0 to 100000 do
+    for i = 0 to 100 do
       let rf1, rf2 = srf a1, srf a2 in
       let rf12 = op1 rf1 rf2 in
       if not (float_in_abstract_float rf12 a12)
@@ -463,7 +463,7 @@ module TestArithmetic = struct
 
   let test_rand () =
     print_endline "Arithmetic: start random tests";
-    for i = 0 to 10 do
+    for i = 0 to 1000 do
       let a1, a2 = RandomAF.pair () in
       test ( +. ) add a1 a2;
       test ( -. ) sub a1 a2;
@@ -508,7 +508,7 @@ module TestReverseAdd = struct
         (dump_internal x; dump_internal nx; assert false)
       else ()
     | Some f -> begin
-        for i = 0 to 10000 do
+        for i = 0 to 100 do
           let fa, fb = RandomAF.(select a, select b) in
           let nxf = f () in
           if bits_eq (nxf +. fa) fb then begin
@@ -732,23 +732,22 @@ module TestReverseAdd = struct
     let a = inject_float 1.0 in
     let b = inject_float 11.0 in
     test x a b
-  
+
   let test_norm_all () =
     test_bug1 ();
     test_bug2 ();
+    test_bug3 ();
+    test_bug4 ();
+    test_bug5 ();
+    test_bug6 ();
+    test_bug7 ();
+    test_bug8 ();
+    test_bug9 ();
+    test_bug10 ();
     ntest1 ();
     ntest2 ()
 
 end
-
-(*
-let test_neg = true
-let test_join = true
-let test_meet = true
-let test_sqrt = true
-let test_arith = true
-let test_pretty = true
-*)
 
 let test_other () =
   let h = Header.(set_flag (of_flag negative_normalish) negative_zero) in
@@ -773,14 +772,9 @@ let test_arith = false
 let test_pretty = false
 let test_reverse = true
 
-let () = if test_join then
-  (TestJoins.test_others (); TestJoins.test_rand ())
+let () = if test_join then TestJoins.(test_others (); test_rand ())
 let () = if test_meet then TestMeet.test_rand ()
 let () = if test_sqrt then TestSqrt.test_rand ()
 let () = if test_arith then TestArithmetic.test_rand ()
 let () = if test_pretty then TestPretty.test_rand ()
-
-let () =
-  if test_reverse then begin
-    TestReverseAdd.test_rand ()
-  end
+let () = if test_reverse then TestReverseAdd.(test_norm_all (); test_rand ())
