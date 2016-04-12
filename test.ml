@@ -368,7 +368,7 @@ module TestJoins = struct
 
   let test_rand () =
     print_endline "Join: start random tests";
-    for i = 0 to 100000 do
+    for i = 0 to 1000000 do
       let a1, a2 = RandomAF.pair () in
       let a12 = join a1 a2 in
       let a21 = join a2 a1 in
@@ -378,7 +378,7 @@ module TestJoins = struct
       assert(is_included a1 a12);
       assert(is_included a2 a12);
     done;
-    for i = 0 to 100 do
+    for i = 0 to 1000000 do
       let a1 = RandomAF.abstract_float () in
       let f = RandomAF.select a1 in
       assert (float_in_abstract_float f a1)
@@ -421,7 +421,7 @@ module TestMeet = struct
 
   let test_rand () =
     print_endline "Meet: start random tests";
-    for i = 0 to 1_000_00 do
+    for i = 0 to 1000000 do
       test ()
     done;
     print_endline "Meet: random tests successful"
@@ -433,7 +433,7 @@ module TestSqrt = struct
 
   let test_rand () =
     print_endline "Sqrt: start random tests";
-    for i = 0 to 1_000_00 do
+    for i = 0 to 1000000 do
       let a = RandomAF.abstract_float () in
       let f1 = RandomAF.select a in
       assert (float_in_abstract_float (sqrt f1) (abstract_sqrt a))
@@ -448,8 +448,12 @@ module TestArithmetic = struct
   let test op1 op2 a1 a2 =
     let srf = RandomAF.select in
     let a12 = op2 a1 a2 in
-    assert(Header.check a12);
-    for i = 0 to 100 do
+    if not (Header.check a12) then begin
+      dump_af a1; dump_af a2;
+      Format.printf "a1: %a\na2: %a\n" pretty a1 pretty a2;
+      assert false
+    end;
+    for i = 0 to 1000 do
       let rf1, rf2 = srf a1, srf a2 in
       let rf12 = op1 rf1 rf2 in
       if not (float_in_abstract_float rf12 a12)
@@ -461,9 +465,28 @@ module TestArithmetic = struct
     end;
     done
 
+  let regress_add1 () =
+    let srf = RandomAF.select in
+    let a = inject_float (-2.9914765924740740e+307) in
+    let hb = Header.(of_flags [negative_normalish; positive_zero]) in
+    let b = Header.allocate_abstract_float hb in
+    set_neg b (-9.4771152698724269e+04) (-2.7803418452892169e+04);
+    let a12 = add a b in
+    for i = 0 to 100 do
+      let rf1, rf2 = srf a, srf b in
+      let rf12 = rf1 +. rf2 in
+      if not (float_in_abstract_float rf12 a12)
+      then begin
+        Format.printf "%a\n%a\n%a\n\n%.16e\n%.16e\n%.16e\n"
+        pretty a pretty b pretty a12
+        rf1 rf2 rf12;
+        assert false;
+      end
+    done
+
   let test_rand () =
     print_endline "Arithmetic: start random tests";
-    for i = 0 to 1000 do
+    for i = 0 to 10000 do
       let a1, a2 = RandomAF.pair () in
       test ( +. ) add a1 a2;
       test ( -. ) sub a1 a2;
@@ -508,7 +531,7 @@ module TestReverseAdd = struct
         (dump_internal x; dump_internal nx; assert false)
       else ()
     | Some f -> begin
-        for i = 0 to 100 do
+        for i = 0 to 1000 do
           let fa, fb = RandomAF.(select a, select b) in
           let nxf = f () in
           if bits_eq (nxf +. fa) fb then begin
@@ -543,14 +566,7 @@ module TestReverseAdd = struct
       set_neg a (-5.) (-4.);
       a in
     let x = [| Int64.float_of_bits 0x7ff0000024560001L |] in
-    let nx = reverse_add x a b in
-    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
-      pretty a pretty b pretty x;
-    assert(Header.check nx);
-    Format.printf "x': %a\n\n" pretty nx;
-    if (not (is_included nx x)) then begin
-      dump_af x; dump_af nx; assert false
-    end else ()
+    test x a b
 
   (* bug in narrow_range: should not use meet *)
   let test_bug2 () =
@@ -560,14 +576,7 @@ module TestReverseAdd = struct
     let b = Header.allocate_abstract_float h in
     set_pos b 2. 3.;
     let x = [| 1.8401032236488259e-308 |] in
-    let nx = reverse_add x a b in
-    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
-      pretty a pretty b pretty x;
-    assert(Header.check nx);
-    Format.printf "x': %a\n" pretty nx;
-    if (not (is_included nx x)) then begin
-      dump_af x; dump_af nx; assert false
-    end else ()
+    test x a b
 
   let test_bug3 () =
     let ha = Header.(set_all_NaNs (of_flag negative_zero)) in
@@ -587,14 +596,7 @@ module TestReverseAdd = struct
       Header.(set_flag hx negative_inf) in
     let hx = Header.(set_all_NaNs hx) in
     let x = Header.allocate_abstract_float hx in
-    let nx = reverse_add x a b in
-    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
-      pretty a pretty b pretty x;
-    assert(Header.check nx);
-    Format.printf "x': %a\n" pretty nx;
-    if (not (is_included nx x)) then begin
-      dump_af x; dump_af nx; assert false
-    end else ()
+    test x a b
 
   (* fixed, Header.reverse_add first true branch *)
   let test_bug4 () =
@@ -613,14 +615,7 @@ module TestReverseAdd = struct
     let hx = Header.(set_flag hx negative_normalish) in
     let x = Header.allocate_abstract_float hx in
     set_neg x (-2.5895361791812356e+04) (-1.7694993162971678e+04);
-    let nx = reverse_add x a b in
-    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
-      pretty a pretty b pretty x;
-    assert(Header.check nx);
-    Format.printf "x': %a\n" pretty nx;
-    if (not (is_included nx x)) then begin
-      dump_af x; dump_af nx; assert false
-    end else ()
+    test x a b
 
   (* bug in reverse_add, neg_overflow *)
   let test_bug5 () =
@@ -641,14 +636,7 @@ module TestReverseAdd = struct
     let x = Header.allocate_abstract_float hx in
     set_neg x (-4.2308300236767202e+04) (-1.4184781505518549e+04);
     set_pos x 5.4694215793246267e-309 2.2250738585072014e-308;
-    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
-      pretty a pretty b pretty x;
-    let nx = reverse_add x a b in
-        assert(Header.check nx);
-    Format.printf "x': %a\n" pretty nx;
-    if (not (is_included nx x)) then begin
-      dump_af x; dump_af nx; assert false
-    end else ()
+    test x a b
 
   (* fixed in fold_range *)
   let test_bug6 () =
@@ -665,14 +653,7 @@ module TestReverseAdd = struct
                                              negative_normalish])) in
     let x = Header.allocate_abstract_float hx in
     set_neg x (-2.6989508761250097e+04) (-3.9173820305161257e+03);
-    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
-      pretty a pretty b pretty x;
-    let nx = reverse_add x a b in
-        assert(Header.check nx);
-    Format.printf "x': %a\n" pretty nx;
-    if (not (is_included nx x)) then begin
-      dump_af x; dump_af nx; assert false
-    end else ()
+    test x a b
 
   let test_bug7 () =
     let ha = Header.(set_all_NaNs (of_flag positive_zero)) in
@@ -683,14 +664,6 @@ module TestReverseAdd = struct
                       hx (One_NaN 0x7ff0000024560001L)) in
     let a = Header.allocate_abstract_float ha in
     let b = Header.allocate_abstract_float hb in
-    Format.printf "a:  %a\nb:  %a\nx:  %a\n"
-      pretty a pretty b pretty x;
-    let nx = reverse_add x a b in
-        assert(Header.check nx);
-    Format.printf "x': %a\n" pretty nx;
-    if (not (is_included nx x)) then begin
-      dump_af x; dump_af nx; assert false
-    end else ();
     test x a b
 
   (* fix range combine, fix zero setting *)
@@ -749,6 +722,53 @@ module TestReverseAdd = struct
 
 end
 
+module TestReverseMult = struct
+
+  let debug = false
+
+  let test x a b =
+    if debug then begin
+      print_endline (String.make 15 '-');
+      Format.printf "a: %a\nb: %a\n" pretty a pretty b;
+      Format.printf "x:  %a\n" pretty x end;
+    let nx = reverse_mult x a b in
+    assert(Header.check nx);
+    if debug then Format.printf "x': %a\n" pretty nx;
+    if (not (is_included nx x)) then begin
+      dump_af x; dump_af nx; assert false
+    end;
+    match RandomAF.diff_selector x nx with
+    | None ->
+      if not (is_included nx x) then
+        (dump_internal x; dump_internal nx; assert false)
+      else ()
+    | Some f -> begin
+        for i = 0 to 1000 do
+          let fa, fb = RandomAF.(select a, select b) in
+          let nxf = f () in
+          if bits_eq (nxf *. fa) fb then begin
+          Format.printf "%s\n" (String.make 10 '~');
+          Format.printf "x : %a\nx': %a\na : %a\nb : %a\n\n"
+            pretty x pretty nx pretty a pretty b;
+          Format.printf "fx': %a\nfa : %a\nfb : %a\n\n"
+            ppf nxf ppf fa ppf fb;
+          assert false
+          end
+        done
+      end
+
+  let test_rand () =
+    print_endline "ReverseMult: start random tests";
+    for i = 0 to 100000 do
+      let a, b = RandomAF.pair () in
+      let x = RandomAF.abstract_float () in
+      test x a b
+    done;
+    print_endline "ReverseMult: random tests successful"
+
+end
+
+
 let test_other () =
   let h = Header.(set_flag (of_flag negative_normalish) negative_zero) in
   let h = Header.(set_all_NaNs h) in
@@ -765,16 +785,21 @@ let test_other1 () =
   let nx = Header.allocate_abstract_float nhx in
   assert(is_included nx x)
 
-let test_join = false
-let test_meet = false
-let test_sqrt = false
-let test_arith = false
-let test_pretty = false
+let test_join = true
+let test_meet = true
+let test_sqrt = true
+let test_arith = true
+let test_pretty = true
 let test_reverse = true
 
+(*
+let () = TestArithmetic.regress_add1 ()
 let () = if test_join then TestJoins.(test_others (); test_rand ())
 let () = if test_meet then TestMeet.test_rand ()
 let () = if test_sqrt then TestSqrt.test_rand ()
 let () = if test_arith then TestArithmetic.test_rand ()
 let () = if test_pretty then TestPretty.test_rand ()
 let () = if test_reverse then TestReverseAdd.(test_norm_all (); test_rand ())
+*)
+
+let () = TestReverseMult.test_rand ()
