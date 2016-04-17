@@ -99,11 +99,9 @@ module RandomAF = struct
   let random_float () =
     match Random.int 7 with
     | 0 -> neg_infinity
-    | 1 -> -. (random_pos_normalish ())
-    | 2 -> -0.0
+    | 1 -> (random_pos_normalish ())
     | 3 -> +0.0
-    | 4 -> random_pos_normalish ()
-    | 5 -> infinity
+    | 4 -> infinity
     | _ -> random_NaN ()
 
   let random_pos_range () =
@@ -693,6 +691,12 @@ module TestReverseAdd = struct
     set_pos b 0.4 1.8;
     test x a b
 
+  let test_bug11 () =
+    let x = top () in
+    let a = abstract_all_NaNs in
+    let b = abstract_all_NaNs in
+    test x a b
+
   let ntest1 () =
     let x = top () in
     let a = inject_float 0.4 in
@@ -717,6 +721,7 @@ module TestReverseAdd = struct
     test_bug8 ();
     test_bug9 ();
     test_bug10 ();
+    test_bug11 ();
     ntest1 ();
     ntest2 ()
 
@@ -766,6 +771,71 @@ module TestReverseMult = struct
     done;
     print_endline "ReverseMult: random tests successful"
 
+  let test_bug11 () =
+    let x = top () in
+    let a = abstract_all_NaNs in
+    let b = abstract_all_NaNs in
+    test x a b
+
+  let test_norm_all () =
+    test_bug11 ()
+
+
+end
+
+module TestReverseDiv = struct
+
+  let debug = false
+
+  let test x a b =
+    if debug then begin
+      print_endline (String.make 15 '-');
+      Format.printf "a: %a\nb: %a\n" pretty a pretty b;
+      Format.printf "x:  %a\n" pretty x end;
+    let nx = reverse_div1 x a b in
+    assert(Header.check nx);
+    if debug then Format.printf "x': %a\n" pretty nx;
+    if (not (is_included nx x)) then begin
+      dump_af x; dump_af nx; assert false
+    end;
+    match RandomAF.diff_selector x nx with
+    | None ->
+      if not (is_included nx x) then
+        (dump_internal x; dump_internal nx; assert false)
+      else ()
+    | Some f -> begin
+        for i = 0 to 1000 do
+          let fa, fb = RandomAF.(select a, select b) in
+          let nxf = f () in
+          if bits_eq (nxf /. fa) fb then begin
+          Format.printf "%s\n" (String.make 10 '~');
+          Format.printf "x : %a\nx': %a\na : %a\nb : %a\n\n"
+            pretty x pretty nx pretty a pretty b;
+          Format.printf "fx': %a\nfa : %a\nfb : %a\n\n"
+            ppf nxf ppf fa ppf fb;
+          assert false
+          end
+        done
+      end
+
+  let test_rand () =
+    print_endline "ReverseDiv: start random tests";
+    for i = 0 to 100000 do
+      let a, b = RandomAF.pair () in
+      let x = RandomAF.abstract_float () in
+      test x a b
+    done;
+    print_endline "ReverseDiv: random tests successful"
+
+  let test_bug11 () =
+    let x = top () in
+    let a = abstract_all_NaNs in
+    let b = abstract_all_NaNs in
+    test x a b
+
+  let test_norm_all () =
+    test_bug11 ()
+
 end
 
 
@@ -785,21 +855,21 @@ let test_other1 () =
   let nx = Header.allocate_abstract_float nhx in
   assert(is_included nx x)
 
-let test_join = true
-let test_meet = true
-let test_sqrt = true
-let test_arith = true
-let test_pretty = true
-let test_reverse = true
+let test_join = false
+let test_meet = false
+let test_sqrt = false
+let test_arith = false
+let test_pretty = false
+let test_reverse_add = false
+let test_reverse_mult = false
+let test_reverse_div = true
 
-(*
 let () = TestArithmetic.regress_add1 ()
 let () = if test_join then TestJoins.(test_others (); test_rand ())
 let () = if test_meet then TestMeet.test_rand ()
 let () = if test_sqrt then TestSqrt.test_rand ()
 let () = if test_arith then TestArithmetic.test_rand ()
 let () = if test_pretty then TestPretty.test_rand ()
-let () = if test_reverse then TestReverseAdd.(test_norm_all (); test_rand ())
-*)
-
-let () = TestReverseMult.test_rand ()
+let () = if test_reverse_add then TestReverseAdd.(test_norm_all (); test_rand ())
+let () = if test_reverse_mult then TestReverseMult.(test_norm_all (); test_rand ())
+let () = if test_reverse_div then TestReverseDiv.(test_norm_all (); test_rand ())
