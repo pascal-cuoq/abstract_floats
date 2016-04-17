@@ -9,6 +9,9 @@ let ppf fmt f =
 let bits_eq f1 f2 =
   Int64.bits_of_float f1 = Int64.bits_of_float f2
 
+let fsucc f = Int64.(float_of_bits @@ succ @@ bits_of_float f)
+let fpred f = Int64.(float_of_bits @@ pred @@ bits_of_float f)
+
 let dump_af a =
   let l = Array.length a in
   Format.printf "[|";
@@ -787,7 +790,7 @@ module TestReverseDiv = struct
 
   let debug = false
 
-  let test x a b =
+  let test x ?loop:(loop=1000) a b  =
     if debug then begin
       print_endline (String.make 15 '-');
       Format.printf "a: %a\nb: %a\n" pretty a pretty b;
@@ -804,9 +807,10 @@ module TestReverseDiv = struct
         (dump_internal x; dump_internal nx; assert false)
       else ()
     | Some f -> begin
-        for i = 0 to 1000 do
+        for i = 0 to loop do
           let fa, fb = RandomAF.(select a, select b) in
           let nxf = f () in
+          Format.printf "%a\n" ppf nxf;
           if bits_eq (nxf /. fa) fb then begin
           Format.printf "%s\n" (String.make 10 '~');
           Format.printf "x : %a\nx': %a\na : %a\nb : %a\n\n"
@@ -827,14 +831,49 @@ module TestReverseDiv = struct
     done;
     print_endline "ReverseDiv: random tests successful"
 
-  let test_bug11 () =
+  let test_bug1 () =
     let x = top () in
     let a = abstract_all_NaNs in
     let b = abstract_all_NaNs in
     test x a b
 
+  let test_loss_accuracy1 () =
+    let ha = Header.(set_flag bottom positive_normalish) in
+    let a = Header.allocate_abstract_float ha in
+    set_pos a 0.3 0.6;
+    let b = inject_float 1.8 in
+    (* from a and b, x should be narrowed by
+       range: [5.4000000000000037e-01, 1.0799999999999998e+00]
+       however, due to the current imperfect algorithm, x is narrowed by
+       range: [5.4000000000000004e-01, 1.0799999999999998e+00] *)
+    let x = inject_float 5.4000000000000015e-01 in
+    let nx = reverse_div1 x a b in
+    Format.printf "%a\n" ppa nx;
+    let f = RandomAF.select nx in
+    let f1 = 0.3
+    and f2 = (fsucc 0.3)
+    and f3 = (fsucc @@ fsucc 0.3)
+    and f4 = (fsucc @@ fsucc @@ fsucc 0.3)
+    and f5 = (fsucc @@ fsucc @@ fsucc @@ fsucc 0.3) in
+    let ff1 = f /. f1 in
+    let ff2 = f /. f2 in
+    let ff3 = f /. f3 in
+    let ff4 = f /. f4 in
+    let ff5 = f /. f5 in
+    Format.printf "[f1]: %a /. %a = %a in B: %b\n"
+    ppf f ppf f1 ppf ff1 (float_in_abstract_float ff1 b);
+    Format.printf "[f2]: %a /. %a = %a in B: %b\n"
+    ppf f ppf f2 ppf ff2 (float_in_abstract_float ff2 b);
+    Format.printf "[f3]: %a /. %a = %a in B: %b\n"
+    ppf f ppf f3 ppf ff3 (float_in_abstract_float ff3 b);
+    Format.printf "[f4]: %a /. %a = %a in B: %b\n"
+    ppf f ppf f4 ppf ff4 (float_in_abstract_float ff4 b);
+    Format.printf "[f5]: %a /. %a = %a in B: %b\n"
+    ppf f ppf f5 ppf ff5 (float_in_abstract_float ff5 b);
+    assert false
+
   let test_norm_all () =
-    test_bug11 ()
+    test_loss_accuracy1 ()
 
 end
 
@@ -872,4 +911,4 @@ let () = if test_arith then TestArithmetic.test_rand ()
 let () = if test_pretty then TestPretty.test_rand ()
 let () = if test_reverse_add then TestReverseAdd.(test_norm_all (); test_rand ())
 let () = if test_reverse_mult then TestReverseMult.(test_norm_all (); test_rand ())
-let () = if test_reverse_div then TestReverseDiv.(test_norm_all (); test_rand ())
+let () = if test_reverse_div then TestReverseDiv.(test_norm_all ())
