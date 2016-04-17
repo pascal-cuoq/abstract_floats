@@ -6,8 +6,12 @@ let ppa fmt a =
 let ppf fmt f =
   Format.fprintf fmt "%.16e" f
 
-let bits_eq f1 f2 =
-  Int64.bits_of_float f1 = Int64.bits_of_float f2
+let custom_eq f1 f2 =
+  if f1 = 0. && f2 = 0. then
+    Int64.bits_of_float f1 = Int64.bits_of_float f2
+  else if f1 = nan && f2 = nan then true
+  else
+    f1 = f2
 
 let fsucc f = Int64.(float_of_bits @@ succ @@ bits_of_float f)
 let fpred f = Int64.(float_of_bits @@ pred @@ bits_of_float f)
@@ -83,33 +87,50 @@ module RandomAF = struct
   let fpred f = Int64.(float_of_bits @@ pred @@ bits_of_float f)
 
   let random_pos_normalish () =
-    match Random.int 15 with
-    | 0 -> min_float
-    | 1 -> max_float
-    | 2 -> Random.float min_float
-    | 3 | 4 -> Random.float max_float
-    | 5 -> Random.float 2e-308
-    | 6 -> 2e-308
-    | 7 -> begin
-        match Random.int 3 with
-        | 0 -> Dichotomy.pos_cp
-        | 1 -> fsucc Dichotomy.pos_cp
-        | _ -> fpred Dichotomy.pos_cp
-      end
-    | 9 -> fsucc Dichotomy.pos_cp
-    | _ -> Random.float 1_000_00.
+    let f =
+      match Random.int 15 with
+      | 0 -> min_float
+      | 1 -> max_float
+      | 2 -> Random.float min_float
+      | 3 | 4 -> Random.float max_float
+      | 5 -> Random.float 2e-308
+      | 6 -> 2e-308
+      | 7 -> begin
+          match Random.int 3 with
+          | 0 -> Dichotomy.pos_cp
+          | 1 -> fsucc Dichotomy.pos_cp
+          | _ -> fpred Dichotomy.pos_cp
+        end
+      | 9 -> fsucc Dichotomy.pos_cp
+      | _ -> Random.float 1_000_00. in
+    if f = 0. then 4.94e-324 else f
 
   let random_float () =
     match Random.int 7 with
-    | 0 -> neg_infinity
-    | 1 -> (random_pos_normalish ())
-    | 3 -> +0.0
+    | 0 | 1 | 2 -> random_pos_normalish ()
+    | 3 -> 0.0
     | 4 -> infinity
     | _ -> random_NaN ()
 
+  let add_some_ulps f n =
+    let rec loop f n =
+      if n = 0 then f else
+        loop (fsucc f) (n - 1) in
+    loop f (1 + Random.int n)
+
   let random_pos_range () =
-    let u = random_pos_normalish () in
-    Random.float u, u
+    match Random.int 5 with
+    | 0 | 1 ->
+      let l = 4.94e-324 +. Random.float 2e-308 in
+      let u = add_some_ulps l 10 in
+      l, u
+    | 2 | 3 ->
+      let l = 10. +. Random.float 10. in
+      let u = add_some_ulps l 100 in
+      l, u
+    | _ ->
+      let u = random_pos_normalish () in
+      Random.float u, u
 
   let random_neg_range () =
     let l, u = random_pos_range () in
@@ -117,10 +138,10 @@ module RandomAF = struct
 
   let abstract_float () =
     shuffle_flags ();
-    match Random.int 5 with
-    | 0 -> let f = random_float () in
+    match Random.int 10 with
+    | 0 | 1 -> let f = random_float () in
       inject_float (if Random.bool () then f else (-. f))
-    | 1 -> begin
+    | 2 -> begin
       match Random.int 3 with
       | 0 ->
         let h = Header.(set_flag bottom (get_flag ())) in
@@ -138,13 +159,13 @@ module RandomAF = struct
         let h = Header.set_all_NaNs h in
         Header.(allocate_abstract_float_with_NaN h All_NaN)
       end
-    | 2 -> begin
+    | 3 | 4 -> begin
         let h = Header.(set_flag bottom positive_normalish) in
         let a = rand_add_NaNs (rand_n_flags h 4) in
         let l, u = random_pos_range () in
         set_pos a l u; a
       end
-    | 3 -> begin
+    | 5 | 6 -> begin
         let h = Header.(set_flag bottom negative_normalish) in
         let a = rand_add_NaNs (rand_n_flags h 4) in
         let l, u = random_neg_range () in
@@ -535,7 +556,7 @@ module TestReverseAdd = struct
         for i = 0 to 1000 do
           let fa, fb = RandomAF.(select a, select b) in
           let nxf = f () in
-          if bits_eq (nxf +. fa) fb then begin
+          if custom_eq (nxf +. fa) fb then begin
           Format.printf "%s\n" (String.make 10 '~');
           Format.printf "x : %a\nx': %a\na : %a\nb : %a\n\n"
             pretty x pretty nx pretty a pretty b;
@@ -754,7 +775,7 @@ module TestReverseMult = struct
         for i = 0 to 1000 do
           let fa, fb = RandomAF.(select a, select b) in
           let nxf = f () in
-          if bits_eq (nxf *. fa) fb then begin
+          if custom_eq (nxf *. fa) fb then begin
           Format.printf "%s\n" (String.make 10 '~');
           Format.printf "x : %a\nx': %a\na : %a\nb : %a\n\n"
             pretty x pretty nx pretty a pretty b;
@@ -802,16 +823,20 @@ module TestReverseDiv = struct
       dump_af x; dump_af nx; assert false
     end;
     match RandomAF.diff_selector x nx with
-    | None ->
+    | None -> (* div special case does not handle *)
       if not (is_included nx x) then
         (dump_internal x; dump_internal nx; assert false)
-      else ()
+(*
+      if is_singleton x && is_singleton nx then
+        let f = nx.(0) in
+        match classify_float f with
+        | FP_normal | FP_subnormal ->
+*)
     | Some f -> begin
         for i = 0 to loop do
           let fa, fb = RandomAF.(select a, select b) in
           let nxf = f () in
-          Format.printf "%a\n" ppf nxf;
-          if bits_eq (nxf /. fa) fb then begin
+          if custom_eq (nxf /. fa) fb then begin
           Format.printf "%s\n" (String.make 10 '~');
           Format.printf "x : %a\nx': %a\na : %a\nb : %a\n\n"
             pretty x pretty nx pretty a pretty b;
@@ -827,6 +852,9 @@ module TestReverseDiv = struct
     for i = 0 to 100000 do
       let a, b = RandomAF.pair () in
       let x = RandomAF.abstract_float () in
+      assert(Header.check a);
+      assert(Header.check b);
+      assert(Header.check x);
       test x a b
     done;
     print_endline "ReverseDiv: random tests successful"
@@ -899,8 +927,8 @@ let test_meet = false
 let test_sqrt = false
 let test_arith = false
 let test_pretty = false
-let test_reverse_add = false
-let test_reverse_mult = false
+let test_reverse_add = true
+let test_reverse_mult = true
 let test_reverse_div = true
 
 let () = TestArithmetic.regress_add1 ()
@@ -911,4 +939,4 @@ let () = if test_arith then TestArithmetic.test_rand ()
 let () = if test_pretty then TestPretty.test_rand ()
 let () = if test_reverse_add then TestReverseAdd.(test_norm_all (); test_rand ())
 let () = if test_reverse_mult then TestReverseMult.(test_norm_all (); test_rand ())
-let () = if test_reverse_div then TestReverseDiv.(test_norm_all ())
+let () = if test_reverse_div then TestReverseDiv.(test_rand ())

@@ -363,6 +363,7 @@ end = struct
   let set_all_zeros h = h lor (negative_zero + positive_zero)
   let get_NaN_part h = h land (at_least_one_NaN + all_NaNs)
   let exactly_one_NaN h = (get_NaN_part h) = at_least_one_NaN
+  let both_have_NaNs h1 h2 = (h1 land h2 land at_least_one_NaN) <> 0
 
   let of_abstract_float a =
     assert (Array.length a >= 2);
@@ -669,7 +670,7 @@ end = struct
            positive_normalish + negative_normalish))
 
   let reverse_add h1 h2 =
-    if get_NaN_part h1 <> 0 && get_NaN_part h2 <> 0 then
+    if both_have_NaNs h1 h2 then
       positive_zero + negative_zero + positive_inf + negative_inf
     else begin
       let h = bottom in
@@ -715,7 +716,7 @@ end = struct
     end
 
   let reverse_mult h1 h2 =
-    if get_NaN_part h1 <> 0 && get_NaN_part h2 <> 0 then
+    if both_have_NaNs h1 h2 then
       positive_zero + negative_zero + positive_inf + negative_inf
     else begin
       let h = bottom in
@@ -767,7 +768,7 @@ end = struct
     end
 
   let reverse_div h1 h2 =
-    if get_NaN_part h1 <> 0 && get_NaN_part h2 <> 0 then
+    if both_have_NaNs h1 h2 then
       positive_zero + negative_zero + positive_inf + negative_inf
     else begin
       let h = bottom in
