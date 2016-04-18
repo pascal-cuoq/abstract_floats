@@ -239,6 +239,8 @@ module Header : sig
 
   val has_zeros : t -> bool
 
+  val both_have_NaNs : t -> t -> bool
+
   val set_flag : t -> flag -> t
   (** [set t f] is [t] with flag [f] set *)
 
@@ -313,6 +315,8 @@ module Header : sig
   val reverse_mult : t -> t -> t
 
   val reverse_div : t -> t -> t
+
+  val reverse_div2 : t -> t -> t
 
 end = struct
   type t = int
@@ -807,7 +811,45 @@ end = struct
       h
     end
 
-
+  let reverse_div2 h1 h2 =
+    if both_have_NaNs h1 h2 then
+      positive_zero + negative_zero + positive_inf + negative_inf
+    else begin
+      let h = bottom in
+      let h =
+        if (((test h1 positive_normalish || test h1 positive_zero)
+             && (test h2 positive_zero)) ||
+            ((test h1 negative_normalish || test h1 negative_zero)
+             && (test h2 negative_zero))) then
+          set_flag h positive_inf else h in
+      let h =
+        if (((test h1 positive_normalish || test h1 positive_zero)
+             && (test h2 negative_zero)) ||
+            ((test h1 negative_normalish || test h1 negative_zero)
+             && (test h2 positive_zero))) then
+          set_flag h negative_inf else h in
+      let h =
+        if (((test h1 positive_normalish || test h1 positive_inf)
+             && (test h2 positive_inf)) ||
+            ((test h1 negative_normalish || test h1 negative_inf)
+             && (test h2 negative_inf))) then
+          set_flag h positive_zero else h in
+      let h =
+        if (((test h1 positive_normalish || test h1 positive_inf)
+             && (test h2 negative_inf)) ||
+            ((test h1 negative_normalish || test h1 negative_inf)
+             && (test h2 positive_inf))) then
+          set_flag h negative_zero else h in
+      let h =
+        if ((test h1 positive_inf && test h1 negative_inf) &&
+            (get_NaN_part h2 <> 0)) then
+          set_flag h (positive_inf + negative_inf) else h in
+      let h =
+        if ((test h1 positive_zero || test h1 positive_zero) &&
+            (get_NaN_part h2 <> 0)) then
+          set_all_zeros h else h in
+      h
+    end
 
 end
 
@@ -1828,6 +1870,8 @@ module Dichotomy : sig
 
   val range_div : float -> float -> float -> float -> (float * float) option
 
+  val range_div_m2 : float -> float -> float -> float -> (float * float) option
+
   val normalize : (float * float) option ->
                   (float * float) option *
                   (float * float) option *
@@ -1852,39 +1896,39 @@ end = struct
         if restore tf a b then approach f (i + 1) else approach tf (i + 1)
     in approach init 0
 
-  let upper_neg_add x y =
-    fsucc @@ dichotomy (fun f a b -> f +. a <= b) neg_zero x y
+  let upper_neg_add a b =
+    fsucc @@ dichotomy (fun x a b -> x +. a <= b) neg_zero a b
 
-  let lower_neg_add = dichotomy (fun f a b -> f +. a < b) neg_zero
+  let lower_neg_add = dichotomy (fun x a b -> x +. a < b) neg_zero
 
-  let upper_pos_add = dichotomy (fun f a b -> f +. a > b) pos_zero
+  let upper_pos_add = dichotomy (fun x a b -> x +. a > b) pos_zero
 
-  let lower_pos_add x y =
-    fsucc @@ dichotomy (fun f a b -> f +. a >= b) pos_zero x y
+  let lower_pos_add a b =
+    fsucc @@ dichotomy (fun x a b -> x +. a >= b) pos_zero a b
 
-  let upper_neg_mult x y =
-    fsucc @@ dichotomy (fun f a b -> f *. a <= b) neg_zero x y
+  let upper_neg_mult a b =
+    fsucc @@ dichotomy (fun x a b -> x *. a <= b) neg_zero a b
 
-  let lower_pos_mult_2 x y =
-    fsucc @@ dichotomy (fun f a b -> f *. a <= b) pos_zero x y
+  let lower_pos_mult_2 a b =
+    fsucc @@ dichotomy (fun x a b -> x *. a <= b) pos_zero a b
 
   let lower_neg_mult =
-    dichotomy (fun f a b -> f *. a < b) neg_zero
+    dichotomy (fun x a b -> x *. a < b) neg_zero
 
   let upper_pos_mult_2 =
-    dichotomy (fun f a b -> f *. a < b) pos_zero
+    dichotomy (fun x a b -> x *. a < b) pos_zero
 
   let upper_pos_mult =
-    dichotomy (fun f a b -> f *. a > b) pos_zero
+    dichotomy (fun x a b -> x *. a > b) pos_zero
 
   let lower_neg_mult_2 =
-    dichotomy (fun f a b -> f *. a > b) neg_zero
+    dichotomy (fun x a b -> x *. a > b) neg_zero
 
-  let lower_pos_mult x y =
-    fsucc @@ dichotomy (fun f a b -> f *. a >= b) pos_zero x y
+  let lower_pos_mult a b =
+    fsucc @@ dichotomy (fun x a b -> x *. a >= b) pos_zero a b
 
-  let upper_neg_mult_2 x y =
-    fsucc @@ dichotomy (fun f a b -> f *. a >= b) neg_zero x y
+  let upper_neg_mult_2 a b =
+    fsucc @@ dichotomy (fun x a b -> x *. a >= b) neg_zero a b
 
   (* smallest pos normalish such that there exists a number x such that
    [pos_cp +. x = infinity] *)
@@ -1948,64 +1992,128 @@ end = struct
       let l = lower_pos_mult au bl in
       if l > u then None else Some (l, u)
 
-  let upper_neg_div x y =
-    fsucc @@ dichotomy (fun f a b -> f /. a <= b) neg_zero x y
+  let upper_neg_div_m1 a b =
+    fsucc @@ dichotomy (fun x a b -> x /. a <= b) neg_zero a b
 
-  let lower_pos_div_2 x y =
-    fsucc @@ dichotomy (fun f a b -> f /. a <= b) pos_zero x y
+  let lower_pos_div_m1_2 a b =
+    fsucc @@ dichotomy (fun x a b -> x /. a <= b) pos_zero a b
 
-  let lower_neg_div =
-    dichotomy (fun f a b -> f /. a < b) neg_zero
+  let lower_neg_div_m1 =
+    dichotomy (fun x a b -> x /. a < b) neg_zero
 
-  let upper_pos_div_2 =
-    dichotomy (fun f a b -> f /. a < b) pos_zero
+  let upper_pos_div_m1_2 =
+    dichotomy (fun x a b -> x /. a < b) pos_zero
 
-  let upper_pos_div =
-    dichotomy (fun f a b -> f /. a > b) pos_zero
+  let upper_pos_div_m1 =
+    dichotomy (fun x a b -> x /. a > b) pos_zero
 
-  let lower_neg_div_2 =
-    dichotomy (fun f a b -> f /. a > b) neg_zero
+  let lower_neg_div_m1_2 =
+    dichotomy (fun x a b -> x /. a > b) neg_zero
 
-  let lower_pos_div x y =
-    fsucc @@ dichotomy (fun f a b -> f /. a >= b) pos_zero x y
+  let lower_pos_div_m1 a b =
+    fsucc @@ dichotomy (fun x a b -> x /. a >= b) pos_zero a b
 
-  let upper_neg_div_2 x y =
-    fsucc @@ dichotomy (fun f a b -> f /. a >= b) neg_zero x y
+  let upper_neg_div_m1_2 a b =
+    fsucc @@ dichotomy (fun x a b -> x /. a >= b) neg_zero a b
 
   let range_div al au bl bu =
     if bl = infinity || bl = neg_infinity then
       if al > 0. then
         if al >= 1. then None else
-          let l, u = lower_pos_div al infinity, max_float in
+          let l, u = lower_pos_div_m1 al infinity, max_float in
           let l, u = if is_neg bl then (-.u, -.l) else l, u in
           Some (l, u)
       else
         if au <= (-1.) then None else
-          let l, u = (-.max_float), upper_neg_div_2 au infinity in
+          let l, u = (-.max_float), upper_neg_div_m1_2 au infinity in
           let l, u = if is_neg bl then (-.u, -.l) else l, u in
           Some (l, u)
     else
     if bl = 0.0 || bl = -0.0 then
       if al > 0. then
         if au < 2. then None else
-          let l, u = smallest_pos, upper_pos_div au 0. in
+          let l, u = smallest_pos, upper_pos_div_m1 au 0. in
           let l, u = if is_neg bl then (-.u, -.l) else l, u in
           Some (l, u)
       else
         if al > -2. then None else
-          let l, u = lower_neg_div_2 al 0., largest_neg in
+          let l, u = lower_neg_div_m1_2 al 0., largest_neg in
           let l, u = if is_neg bl then (-.u, -.l) else l, u in
           Some (l, u)
     else
       let xl, xu =
         if is_pos au && is_pos bu then
-          lower_pos_div al bl, upper_pos_div au bu else
+          lower_pos_div_m1 al bl, upper_pos_div_m1 au bu else
         if is_pos au && is_neg bu then
-          lower_neg_div al bl, upper_neg_div au bu else
+          lower_neg_div_m1 al bl, upper_neg_div_m1 au bu else
         if is_neg au && is_pos bu then
-          lower_neg_div_2 al bl, upper_neg_div_2 au bu
+          lower_neg_div_m1_2 al bl, upper_neg_div_m1_2 au bu
         else
-          lower_pos_div_2 al bl, upper_pos_div_2 au bu in
+          lower_pos_div_m1_2 al bl, upper_pos_div_m1_2 au bu in
+      if xl > xu then None else Some (xl, xu)
+
+  let div2_cp = 4.4408920985006257e-16
+  (* least value that can be divided and overflow to infinity *)
+  let div2_cp2 = 8.8817841970012523e-16
+
+  let upper_neg_div_m2 a b =
+    fsucc @@ dichotomy (fun x a b -> a /. x <= b) neg_zero a b
+
+  let lower_pos_div_m2_2 a b =
+    fsucc @@ dichotomy (fun x a b -> a /. x <= b) pos_zero a b
+
+  let lower_neg_div_m2 =
+    dichotomy (fun x a b -> a /. x < b) neg_zero
+
+  let upper_pos_div_m2_2 =
+    dichotomy (fun x a b -> a /. x < b) pos_zero
+
+  let upper_pos_div_m2 =
+    dichotomy (fun x a b -> a /. x > b) pos_zero
+
+  let lower_neg_div_m2_2 =
+    dichotomy (fun x a b -> a /. x > b) neg_zero
+
+  let lower_pos_div_m2 a b =
+    fsucc @@ dichotomy (fun x a b -> a /. x >= b) pos_zero a b
+
+  let upper_neg_div_m2_2 a b =
+    fsucc @@ dichotomy (fun x a b -> a /. x >= b) neg_zero a b
+
+  let range_div_m2 al au bl bu =
+    if bl = 0. || bl = -0. then
+      if al > 0. then
+        if al > div2_cp then None else
+          let l, u = lower_pos_div_m2_2 al 0., max_float in
+          let l, u = if is_neg bl then (-.u, -.l) else l, u in
+          Some (l, u)
+      else
+      if au < (-.div2_cp) then None else
+        let l, u = (-.max_float), upper_neg_div_m2 au 0. in
+        let l, u = if is_neg bl then (-.u, -.l) else l, u in
+        Some (l, u)
+    else
+    if bl = infinity || bl = neg_infinity then
+      if au > 0. then
+        if au < div2_cp2 then None else
+          let l, u = smallest_pos, upper_pos_div_m2_2 au infinity in
+          let l, u = if is_neg bl then (-.u), (-.l) else l, u in
+          Some (l, u)
+      else
+      if al > -.div2_cp2 then None else
+        let l, u = lower_neg_div_m2 al infinity, largest_neg in
+        let l, u = if is_neg bl then (-.u), (-.l) else l, u in
+        Some (l, u)
+    else
+      let xl, xu =
+        if is_pos au && is_pos bu then
+          lower_pos_div_m2_2 al bl, upper_pos_div_m2_2 au bu else
+        if is_pos au && is_neg bu then
+          lower_neg_div_m2_2 al bl, upper_neg_div_m2_2 au bu else
+        if is_neg au && is_pos bu then
+          lower_neg_div_m2 al bl, upper_neg_div_m2 au bu
+        else
+          lower_pos_div_m2 al bl, upper_pos_div_m2 au bu in
       if xl > xu then None else Some (xl, xu)
 
   let normalize = function
@@ -2221,7 +2329,7 @@ let reverse_add x a b =
     end
     else None, None in
   let all_pos_neg_NaNs =
-    if Header.(test ha at_least_one_NaN && test hb at_least_one_NaN) then
+    if Header.(both_have_NaNs ha hb) then
       get_neg_range hx x, get_pos_range hx x else None, None in
   check_range ~msg:"napb" napb;
   let l = [pos_overflow; neg_overflow; both_inf;
@@ -2349,7 +2457,7 @@ let reverse_mult x a b =
       reduce_neg_norm_if_neg (Dichotomy.range_mult al au (-0.0) (-0.0)) hx x
     else None in
   let all_neg_NaNs, all_pos_NaNs =
-    if Header.(test ha at_least_one_NaN && test hb at_least_one_NaN) then
+    if Header.(both_have_NaNs ha hb) then
       get_neg_range hx x, get_pos_range hx x else None, None in
   let nrs = [neg_pinf_n; ninf_pinf_n; pos_ninf_n; pinf_ninf_n; ninf_pinf_n;
              nzpz_pznz_n; np_n; pn_n; npz_n; pnz_n; all_neg_NaNs] in
@@ -2392,15 +2500,13 @@ let reverse_div1 x a b =
                (test ha negative_zero && test hb negative_inf) ||
                (test ha positive_inf && test hb positive_zero) ||
                (test ha negative_inf && test hb negative_zero)  ||
-               (test ha at_least_one_NaN && test hb at_least_one_NaN)) then
-      prx else None in
+               (both_have_NaNs ha hb)) then prx else None in
   let all_neg =
     if Header.((test ha negative_zero && test hb positive_inf) ||
                (test ha positive_zero && test hb negative_inf) ||
                (test ha negative_inf && test hb positive_zero) ||
                (test ha positive_inf && test hb negative_zero) ||
-               (test ha at_least_one_NaN && test hb at_least_one_NaN)) then
-       nrx else None in
+               (both_have_NaNs ha hb)) then nrx else None in
   let papb_p =
     match pra, prb with
     | Some (al, au), Some (bl, bu) ->
@@ -2499,7 +2605,123 @@ let reverse_div1 x a b =
   (match pr with None -> () | Some (pl, pu) -> set_pos a pl pu);
   normalize a
 
-
 (* The set of values x such that a / x == b *)
-let reverse_div2 a b =
-  assert false
+let reverse_div2 x a b =
+  let a = if is_singleton a then expand a else a in
+  let b = if is_singleton b then expand b else b in
+  let x = if is_singleton x then expand x else x in
+  let hx, ha, hb =
+    Header.(of_abstract_float x, of_abstract_float a, of_abstract_float b) in
+  let nhx = Header.(narrow hx (reverse_div2 ha hb)) in
+  let pra, nra = get_pos_range ha a, get_neg_range ha a in
+  let prb, nrb = get_pos_range hb b, get_neg_range hb b in
+  let prx, nrx = get_pos_range hx x, get_neg_range hx x in
+  let all_pos =
+    if Header.((test ha positive_inf && test hb positive_inf) ||
+               (test ha negative_inf && test hb negative_inf) ||
+               (test ha positive_zero && test hb positive_zero) ||
+               (test ha negative_zero && test hb negative_zero) ||
+               (both_have_NaNs ha hb)) then prx else None in
+  let all_neg =
+    if Header.((test ha positive_inf && test hb negative_inf) ||
+               (test ha negative_inf && test hb positive_inf) ||
+               (test ha positive_zero && test hb negative_zero) ||
+               (test ha negative_zero && test hb positive_zero) ||
+               (both_have_NaNs ha hb)) then nrx else None in
+  let papb_p =
+    match pra, prb with
+    | Some (al, au), Some (bl, bu) ->
+      reduce_pos_norm_if_pos (Dichotomy.range_div_m2 al au bl bu) hx x
+    | _, _ -> None in
+  let panb_n =
+    match pra, nrb with
+    | Some (al, au), Some (bl, bu) ->
+      reduce_neg_norm_if_neg (Dichotomy.range_div_m2 al au bl bu) hx x
+    | _, _ -> None in
+  let napb_n =
+    match nra, prb with
+    | Some (al, au), Some (bl, bu) ->
+      reduce_neg_norm_if_neg (Dichotomy.range_div_m2 al au bl bu) hx x
+    | _, _ -> None in
+  let nanb_p =
+    match nra, nrb with
+    | Some (al, au), Some (bl, bu) ->
+      reduce_pos_norm_if_pos (Dichotomy.range_div_m2 al au bl bu) hx x
+    | _, _ -> None in
+  let papinf_p =
+    match pra with
+    | None -> None
+    | Some (al, au) ->
+      if not Header.(test hb positive_inf) then None else
+      let r = Dichotomy.range_div_m2 al au infinity infinity in
+      reduce_pos_norm_if_pos r hx x in
+  let paninf_n =
+    match pra with
+    | None -> None
+    | Some (al, au) ->
+      if not Header.(test hb negative_inf) then None else
+        let r = Dichotomy.range_div_m2 al au neg_infinity neg_infinity in
+        reduce_neg_norm_if_neg r hx x in
+  let napinf_n =
+    match nra with
+    | None -> None
+    | Some (al, au) ->
+      if not Header.(test hb positive_inf) then None else
+        let r = Dichotomy.range_div_m2 al au infinity infinity in
+        reduce_neg_norm_if_neg r hx x in
+  let naninf_p =
+    match nra with
+    | None -> None
+    | Some (al, au) ->
+      if not Header.(test hb negative_inf) then None else
+        let r = Dichotomy.range_div_m2 al au neg_infinity neg_infinity in
+        reduce_pos_norm_if_pos r hx x in
+  let papz_p =
+    match pra with
+    | None -> None
+    | Some (al, au) ->
+      if not Header.(test hb positive_zero) then None else
+        let r = Dichotomy.range_div_m2 al au 0. 0. in
+        reduce_pos_norm_if_pos r hx x in
+  let panz_n =
+    match pra with
+    | None -> None
+    | Some (al, au) ->
+      if not Header.(test hb negative_zero) then None else
+        let r = Dichotomy.range_div_m2 al au (-0.) (-0.) in
+        reduce_neg_norm_if_neg r hx x in
+  let napz_n =
+    match nra with
+    | None -> None
+    | Some (al, au) ->
+      if not Header.(test hb positive_zero) then None else
+        let r = Dichotomy.range_div_m2 al au (0.) (0.) in
+        reduce_neg_norm_if_neg r hx x in
+  let nanz_p =
+    match nra with
+    | None -> None
+    | Some (al, au) ->
+      if not Header.(test hb negative_zero) then None else
+        let r = Dichotomy.range_div_m2 al au (-0.) (-0.) in
+        reduce_pos_norm_if_pos r hx x in
+  let nrs = [all_neg; panb_n; napb_n; paninf_n; napinf_n; panz_n; napz_n] in
+  let prs = [all_pos; papb_p; nanb_p; papinf_p; naninf_p; papz_p; nanz_p] in
+  let nr = fold_range None nrs in
+  let pr = fold_range None prs in
+  let nhx =
+    if nr <> None then Header.(set_flag nhx negative_normalish) else nhx in
+  let nhx =
+    if pr <> None then Header.(set_flag nhx positive_normalish) else nhx in
+  let a =
+    if Header.(test hb at_least_one_NaN) then
+      match Header.reconstruct_NaN x with
+      | Header.No_NaN -> Header.allocate_abstract_float nhx
+      | Header.All_NaN ->
+        Header.(allocate_abstract_float (set_all_NaNs nhx))
+      | _ as r ->
+        let nhx = Header.(set_flag nhx at_least_one_NaN) in
+        Header.allocate_abstract_float_with_NaN nhx r
+    else Header.(allocate_abstract_float nhx) in
+  (match nr with None -> () | Some (nl, nu) -> set_neg a nl nu);
+  (match pr with None -> () | Some (pl, pu) -> set_pos a pl pu);
+  normalize a

@@ -13,4 +13,4 @@ coverage:
 
 clean:
 	rm -rf coverage
-	rm -f *.cmo *.cmi *.cmp *.out *.html *.o
+	rm -f *.cmo *.cmi *.cmx *.cmp *.out *.html *.o

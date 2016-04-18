@@ -10,6 +10,8 @@ let custom_eq f1 f2 =
   if f1 = 0. && f2 = 0. then
     Int64.bits_of_float f1 = Int64.bits_of_float f2
   else if f1 = nan && f2 = nan then true
+  (* assume all NaNs result from arithmetic operation are the same
+     see "Notes on arithmetic involving NaN" in float.ml *)
   else
     f1 = f2
 
@@ -905,6 +907,61 @@ module TestReverseDiv = struct
 
 end
 
+module TestReverseDiv2 = struct
+
+  let debug = false
+
+  let test x ?loop:(loop=1000) a b  =
+    if debug then begin
+      print_endline (String.make 15 '-');
+      Format.printf "a: %a\nb: %a\n" pretty a pretty b;
+      Format.printf "x:  %a\n" pretty x end;
+    let nx = reverse_div2 x a b in
+    assert(Header.check nx);
+    if debug then Format.printf "x': %a\n" pretty nx;
+    if (not (is_included nx x)) then begin
+      dump_af x; dump_af nx; assert false
+    end;
+    match RandomAF.diff_selector x nx with
+    | None -> (* div special case does not handle *)
+      if not (is_included nx x) then
+        (dump_internal x; dump_internal nx; assert false)
+    | Some f -> begin
+        for i = 0 to loop do
+          let fa, fb = RandomAF.(select a, select b) in
+          let nxf = f () in
+          if custom_eq (fa /. nxf) fb then begin
+          Format.printf "%s\n" (String.make 10 '~');
+          Format.printf "x : %a\nx': %a\na : %a\nb : %a\n\n"
+            pretty x pretty nx pretty a pretty b;
+          Format.printf "fx': %a\nfa : %a\nfb : %a\n\n"
+            ppf nxf ppf fa ppf fb;
+          assert false
+          end
+        done
+      end
+
+  let test_rand () =
+    print_endline "ReverseDiv2: start random tests";
+    for i = 0 to 100000 do
+      let a, b = RandomAF.pair () in
+      let x = RandomAF.abstract_float () in
+      assert(Header.check a);
+      assert(Header.check b);
+      assert(Header.check x);
+      test x a b
+    done;
+    print_endline "ReverseDiv2: random tests successful"
+
+  let test_bug1 () =
+    let x = top () in
+    let a = abstract_all_NaNs in
+    let b = abstract_all_NaNs in
+    test x a b
+
+  let test_norm_all () = test_bug1 ()
+
+end
 
 let test_other () =
   let h = Header.(set_flag (of_flag negative_normalish) negative_zero) in
@@ -927,9 +984,10 @@ let test_meet = false
 let test_sqrt = false
 let test_arith = false
 let test_pretty = false
-let test_reverse_add = true
-let test_reverse_mult = true
-let test_reverse_div = true
+let test_reverse_add = false
+let test_reverse_mult = false
+let test_reverse_div = false
+let test_reverse_div2 = true
 
 let () = TestArithmetic.regress_add1 ()
 let () = if test_join then TestJoins.(test_others (); test_rand ())
@@ -938,5 +996,12 @@ let () = if test_sqrt then TestSqrt.test_rand ()
 let () = if test_arith then TestArithmetic.test_rand ()
 let () = if test_pretty then TestPretty.test_rand ()
 let () = if test_reverse_add then TestReverseAdd.(test_norm_all (); test_rand ())
-let () = if test_reverse_mult then TestReverseMult.(test_norm_all (); test_rand ())
-let () = if test_reverse_div then TestReverseDiv.(test_rand ())
+let () =
+  if test_reverse_mult then
+    TestReverseMult.(test_norm_all (); test_rand ())
+let () =
+  if test_reverse_div then
+    TestReverseDiv.(test_rand ())
+let () =
+  if test_reverse_div2 then
+    TestReverseDiv2.(test_rand ())
