@@ -69,6 +69,9 @@ let is_pos_zero f = Int64.bits_of_float f = 0L
 
 let is_neg_zero f = Int64.bits_of_float f = sign_bit
 
+let fsucc f = Int64.(float_of_bits @@ succ @@ bits_of_float f)
+let fpred f = Int64.(float_of_bits @@ pred @@ bits_of_float f)
+
 let largest_neg = -4.94e-324
 let smallest_pos = +4.94e-324
 let smallest_neg = -.max_float
@@ -239,6 +242,8 @@ module Header : sig
 
   val has_zeros : t -> bool
 
+  val has_infs : t -> bool
+
   val both_have_NaNs : t -> t -> bool
 
   val set_flag : t -> flag -> t
@@ -307,6 +312,8 @@ module Header : sig
   val mult: t -> t -> t
 
   val div: t -> t -> t
+
+  val fmod: t -> t -> t
 
   val meet : t -> t -> t
 
@@ -426,6 +433,8 @@ end = struct
   let zeros_mask = positive_zero + negative_zero
 
   let has_zeros h = (h land zeros_mask) <> 0
+
+  let has_infs h = (h land positive_inf + negative_inf) <> 0
 
   let size h =
     let posneg = h land normalish_mask in
@@ -667,6 +676,19 @@ end = struct
     infinities lor zeroes lor nan
 
   let div h1 h2 = mult h1 (inv h2)
+
+  let fmod h1 h2 =
+    let h = bottom in
+    let y_has_pn =
+      test h2 (positive_normalish + negative_normalish
+               + positive_inf + negative_inf) in
+    let h =
+      let x_zeros = h1 land (positive_zero + negative_zero) in
+      if y_has_pn then
+        h lor x_zeros else h in
+    if test h1 (positive_inf + negative_inf) &&
+       test h2 (positive_zero + negative_zero) then
+      set_all_NaNs h else h
 
   let meet h1 h2 =
     h1 land h2 land
@@ -1882,8 +1904,6 @@ end = struct
   let neg_zero = Int64.float_of_bits 0x8000_0000_0000_0000L
   let pos_zero = Int64.float_of_bits 0x0000_0000_0000_0000L
 
-  let fsucc f = Int64.(float_of_bits @@ succ @@ bits_of_float f)
-  let fpred f = Int64.(float_of_bits @@ pred @@ bits_of_float f)
 
   let on_bit f pos =
     let mask = Int64.(shift_right 0x4000_0000_0000_0000L pos) in
@@ -2725,3 +2745,193 @@ let reverse_div2 x a b =
   (match nr with None -> () | Some (nl, nu) -> set_neg a nl nu);
   (match pr with None -> () | Some (pl, pu) -> set_pos a pl pu);
   normalize a
+
+(*
+   [3, 4] [5, 6]
+
+   [-4, -3] [5, 6]
+
+   [3, 4] [-6, -5]
+
+   [-4, -3] [5, 6]
+
+   [10, 12] [7, 8]
+
+   [1, 2] [3, 4]
+
+   [3, 6] [1, 2]
+
+   [12, 15] [5, 11]
+
+   [12, 30] [1, 2]
+
+*)
+
+module IntVal = struct
+
+  module Int = Big_int
+
+  type t =
+    | Set of Int.big_int array
+    | Top of
+        Int.big_int option * Int.big_int option * Int.big_int * Int.big_int
+
+  let pp fmt t =
+    match t with
+    | Set a ->
+      Format.fprintf fmt "{";
+      let l = Array.length a in
+      let rec loop i =
+        if i = l then () else begin
+          Format.fprintf fmt "%s" (Int.string_of_big_int a.(i));
+          if i < l - 1 then Format.fprintf fmt ", "
+        end in
+      loop 0;
+      Format.fprintf fmt "}"
+    | Top (l, u, f, m) ->
+      Format.fprintf fmt "(";
+      (match l with
+      | None -> Format.fprintf fmt "None, "
+      | Some bint -> Format.fprintf fmt "%s, " (Int.string_of_big_int bint));
+      (match u with
+      | None -> Format.fprintf fmt "None, "
+      | Some bint -> Format.fprintf fmt "%s, " (Int.string_of_big_int bint));
+      Format.fprintf fmt "%s, " (Int.string_of_big_int f);
+      Format.fprintf fmt "%s)" (Int.string_of_big_int m)
+       
+  let to_string t = Format.asprintf "%a" pp t
+
+  let small_cardinal = ref 8
+
+  let itv_size l u =
+    Int64.(succ @@ abs @@ sub (bits_of_float l) (bits_of_float u))
+
+  let signed_big_int_of_float f =
+    Int.big_int_of_int64 (Int64.bits_of_float f)
+
+  let all_NaN_size =
+    let s = itv_size (Int64.float_of_bits 0x7FF0000000000001L)
+                     (Int64.float_of_bits 0x7FFFFFFFFFFFFFFFL) in
+    Int.big_int_of_int64 (Int64.mul 2L s)
+
+  let big_zero = Int.zero_big_int
+  let big_one = Int.unit_big_int
+
+  let size_of_abstract_float a =
+    let size_of_header h =
+      let n =
+        List.fold_left
+          (fun acc flg -> if Header.test h flg then
+              Int.succ_big_int acc else acc) big_zero
+        Header.([positive_zero; negative_zero; positive_inf; negative_inf]) in
+      if Header.(test h all_NaNs) then Int.add_big_int n all_NaN_size else
+      if Header.(test h at_least_one_NaN) then Int.succ_big_int n else n in
+    match Array.length a with
+    | 1 -> Int.big_int_of_int64 1L
+    | 2 -> size_of_header (Header.of_abstract_float a)
+    | _ ->
+      let h = Header.of_abstract_float a in
+      let n = size_of_header h in
+      let n =
+        if Header.(test h positive_normalish) then
+          let l, u = (-. get_opp_pos_lower a), (get_pos_upper a) in
+          Int.(add_big_int n (big_int_of_int64 (itv_size l u))) else n in
+      if Header.(test h negative_normalish) then
+          let l, u = (-. get_opp_neg_lower a), (get_neg_upper a) in
+          Int.(add_big_int n (big_int_of_int64 (itv_size l u))) else n
+
+  (* the size of all NaN values are really large, so if
+     one is sane, he will not set [small_cardinal]
+     to be larger than this size *)
+
+  (* not sure what name
+     first argument is a function that converts float to either signed
+     or unsigned big int *)
+  let to_int_range big_int_of_float a =
+    let array_of_float_range l u =
+      let s = Int64.to_int (itv_size l u) in
+      let bigl = big_int_of_float l in
+      Array.init s (fun i -> Int.add_int_big_int i bigl) in
+     let l1, u1, l2, u2 = Int64.(
+        float_of_bits 0x7FF0000000000001L,
+        float_of_bits 0x7FFFFFFFFFFFFFFFL,
+        float_of_bits 0xFFF0000000000001L,
+        float_of_bits 0xFFFFFFFFFFFFFFFFL) in
+    let all_NaN_value () =
+       Array.append (array_of_float_range l1 u1) (array_of_float_range l2 u2) in
+    let header_normal_values_to_array a =
+      let h = Header.of_abstract_float a in
+      let vmap =
+        Header.([positive_zero, +0.;
+                 negative_zero, -0.;
+                 negative_inf, neg_infinity;
+                 negative_zero,neg_infinity]) in
+      Array.of_list (List.fold_left (fun l (f, v) ->
+        if Header.test h f then (big_int_of_float v) :: l else l) [] vmap) in
+    let _NaN_values_to_array a =
+      Header.(
+        match reconstruct_NaN a with
+        | No_NaN -> [| |]
+        | All_NaN -> all_NaN_value ()
+        | One_NaN n -> [| big_int_of_float (Int64.float_of_bits n) |]) in
+    let s = size_of_abstract_float a in
+    if Int.(le_big_int s (big_int_of_int (!small_cardinal))) then
+      let l =
+        match Array.length a with
+        | 1 -> [| big_int_of_float a.(0) |]
+        | 2 -> Array.append
+                 (header_normal_values_to_array a) (_NaN_values_to_array a)
+        | _ ->
+          let h = Header.of_abstract_float a in
+          let normal_vals = header_normal_values_to_array a in
+          let _NaN_vals = _NaN_values_to_array a in
+          let neg_vals =
+            match get_neg_range h a with
+            | None -> [| |]
+            | Some (l, u) -> array_of_float_range l u in
+          let pos_vals =
+            match get_pos_range h a with
+            | None -> [| |]
+            | Some (l, u) -> array_of_float_range l u in
+          Array.concat [normal_vals; _NaN_vals; neg_vals; pos_vals] in
+      Array.sort Int.compare_big_int l;
+      Set l
+    else
+      match Array.length a with
+      | 1 ->
+        let f = big_int_of_float a.(0) in
+        Top (Some f, Some f, big_zero, big_one)
+      | _ ->
+        let h = Header.of_abstract_float a in
+        let vs = Array.to_list (header_normal_values_to_array a) in
+        let vs =
+          match get_pos_range h a with
+          | None -> vs
+          | Some (l, u) ->
+            let l = big_int_of_float l and u = big_int_of_float u in
+            l :: u :: vs in
+        let vs =
+          match get_neg_range h a with
+          | None -> vs
+          | Some (l, u) ->
+            let l = big_int_of_float l and u = big_int_of_float u in
+            l :: u :: vs in
+        let vs = Header.(
+            match reconstruct_NaN a with
+            | No_NaN -> vs
+            | All_NaN -> vs @ (List.map big_int_of_float [l1; u1; l2; u2])
+            | One_NaN n -> big_int_of_float (Int64.float_of_bits n) :: vs) in
+        match vs with
+        | [] -> Top (None, None, big_zero, big_one)
+        | v :: tl ->
+          let minv, maxv =
+          List.fold_left (fun (minv, maxv) v ->
+                Int.min_big_int minv v, Int.max_big_int maxv v) (v, v) vs in
+          Top (Some minv, Some maxv, big_zero, big_one)
+
+  let to_signed_int =
+    to_int_range signed_big_int_of_float
+
+end
+
+

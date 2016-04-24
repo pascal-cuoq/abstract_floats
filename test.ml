@@ -989,6 +989,7 @@ let test_reverse_mult = false
 let test_reverse_div = false
 let test_reverse_div2 = true
 
+(*
 let () = TestArithmetic.regress_add1 ()
 let () = if test_join then TestJoins.(test_others (); test_rand ())
 let () = if test_meet then TestMeet.test_rand ()
@@ -1005,3 +1006,8 @@ let () =
 let () =
   if test_reverse_div2 then
     TestReverseDiv2.(test_rand ())
+*)
+
+let () =
+  let t = top () in
+  ignore (IntVal.to_signed_int t)
