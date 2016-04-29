@@ -963,6 +963,50 @@ module TestReverseDiv2 = struct
 
 end
 
+module TestFmod = struct
+
+  let srf = RandomAF.select
+
+  let test a1 a2 =
+    let a12 = fmod a1 a2 in
+    assert(Header.check a12);
+    let rf1, rf2 = srf a1, srf a2 in
+    let rf12 = mod_float rf1 rf2 in
+    if not (float_in_abstract_float rf12 a12) then begin
+      Format.printf "%a\n%a\n%a\n\n%.16e\n%.16e\n%.16e\n"
+      pretty a1 pretty a2 pretty a12 rf1 rf2 rf12;
+      assert false
+    end
+
+  let test_rand () =
+    print_endline "Fmod: start random tests";
+    for i = 0 to 100000000000000 do
+      let a1, a2 = RandomAF.pair () in
+      test a1 a2
+    done
+
+  (*
+     {-2.7783965750357370e+307}
+     {±0,±∞,NaN:7ff0000024560001} ∪ [-1.5162948824415059e+01 ... -1.5162948824415057e+01]
+     {NaN} ∪ [-2.7783965750357370e+307 ... -1.1971026701032343e+01]
+
+     -2.7783965750357370e+307
+     -1.5162948824415057e+01
+     -1.0522307013944967e+01
+  *)
+
+  let test1 () =
+    let a = inject_float (-2.7783965750357370e+307) in
+    let hb = Header.(set_flag bottom negative_normalish) in
+    let b = Header.allocate_abstract_float hb in
+    set_neg b (-1.5162948824415059e+01) (-1.5162948824415057e+01);
+    for i = 0 to 1000000 do
+      test a b
+    done
+
+
+end
+
 let test_other () =
   let h = Header.(set_flag (of_flag negative_normalish) negative_zero) in
   let h = Header.(set_all_NaNs h) in
@@ -987,9 +1031,9 @@ let test_pretty = false
 let test_reverse_add = false
 let test_reverse_mult = false
 let test_reverse_div = false
-let test_reverse_div2 = true
+let test_reverse_div2 = false
+let test_fmod = true
 
-(*
 let () = TestArithmetic.regress_add1 ()
 let () = if test_join then TestJoins.(test_others (); test_rand ())
 let () = if test_meet then TestMeet.test_rand ()
@@ -1006,8 +1050,7 @@ let () =
 let () =
   if test_reverse_div2 then
     TestReverseDiv2.(test_rand ())
-*)
-
 let () =
-  let t = top () in
-  ignore (IntVal.to_signed_int t)
+  if test_fmod then
+    TestFmod.(test1())
+

@@ -326,6 +326,7 @@ module Header : sig
   val reverse_div2 : t -> t -> t
 
 end = struct
+
   type t = int
 
   type flag = int
@@ -686,8 +687,10 @@ end = struct
       let x_zeros = h1 land (positive_zero + negative_zero) in
       if y_has_pn then
         h lor x_zeros else h in
-    if test h1 (positive_inf + negative_inf) &&
-       test h2 (positive_zero + negative_zero) then
+    if (test h1 (positive_inf + negative_inf) &&
+        test h2 (positive_zero + negative_zero)) ||
+       test h1 at_least_one_NaN || test h2 at_least_one_NaN ||
+       (h1 <> 0 && (h2 lor (positive_zero + negative_zero) <> 0)) then
       set_all_NaNs h else h
 
   let meet h1 h2 =
@@ -2764,8 +2767,185 @@ let reverse_div2 x a b =
    [12, 15] [5, 11]
 
    [12, 30] [1, 2]
-
 *)
+
+(*
+   some notes about fmod:
+   the hard part is mod two intervals.
+   take moding two positive intervals as example:
+
+   A = [al, au], B = [bl, bu]
+
+   X = ???
+
+   Cases:
+
+   1) bl > au ([1, 2], [3, 4])
+
+      X = [al, au]
+
+   2) bl <= au
+
+    2.1) bu > al ([1, 5], [2, 4])
+
+         X = [0, pred(bu)]   (example: [0, 3])
+
+    2.2) bu = al
+
+         if bl = al, then [0, 0]
+
+         if bl < al, then [0, ???]
+
+          *****************************************
+          *                                       *
+          *     OVER APPROXIMATE UPPER BOUND      *
+          *                                       *
+          *****************************************
+
+          not sure how to get xu here
+
+          example 1:
+
+          al, au = [3, 6]
+          bl, bu = [1, 3]
+
+          il = al / bu = 0
+          iu = au / bl = 6
+
+          3       : pred(6), pred(9), pred(12) -> pred(3)
+          pred(3) : pred(pred(6))
+
+          example 2:
+
+          al, au = [3, 3.5]
+          bl, bu = [1, 3]
+
+          really don't know how to get upper bound here.
+          let's just let xu = bu
+
+    2.3) bu < al
+
+         question:
+
+         if il < iu,
+           exists a, b, i, s.t: a = i * b?
+
+         example 1:
+
+         A = [11, 13], B = [5, 7]
+
+         xl = al / bu = 1
+         xu = au / bl = 2
+
+         X = [0, 7] (upper bound over-approximated)
+
+         example 2:
+
+         A = [3, 6], B = [1, 2]
+
+         xl = al / bu = 1
+         xu = au / bl = 6
+
+         X = [0, 6] (upper bound over-approximated)
+
+         example 3:
+
+         A = [11, 13], B = [8, 9]
+
+         xl = al / bu = 1
+         xu = au / bl = 1
+
+         11 mod 8 = 3
+         11 mod 9 = 2
+         13 mod 8 = 5
+         13 mod 9 = 4
+
+         X = [2, 5]
+
+   *)
+
+let mod_range al au bl bu =
+  let trunc x =
+    if is_neg x then ceil x else floor x in
+  let do_mod al au bl bu =
+    if bl > au then al, au else begin
+      if bu > al then 0., fpred bu else
+      if bu = al then begin
+        if bl = al then 0., 0. else 0., bu
+      end else
+        let il, iu = trunc (al /. bu), trunc (au /. bl) in
+        if (il = 0. && iu = 0.) || il <> iu ||
+            il = infinity || iu = infinity then 0., bu else
+          mod_float al bu, mod_float au bl
+    end in
+  let na, nb = is_neg al, is_neg bl in
+  let al, au = if na then -.au, -.al else al, au in
+  let bl, bu = if nb then -.bu, -.bl else bl, bu in
+  (* Printf.printf "%.16e, %.16e, %.16e %.16e\n" al au bl bu; *)
+  let l, u = do_mod al au bl bu in
+  (* Printf.printf "%.16e, %.16e\n" l u; *)
+  if na then -.u, -.l else l, u
+
+let fmod a b =
+  let a = if is_singleton a then expand a else a in
+  let b = if is_singleton b then expand b else b in
+  let ha, hb = Header.(of_abstract_float a, of_abstract_float b) in
+  let header = Header.fmod ha hb in
+  let opp_neg_l, neg_u = 0., neg_infinity in
+  let opp_pos_l, pos_u = neg_infinity, 0. in
+  let na, pa = get_neg_range ha a, get_pos_range ha a in
+  let nb, pb = get_neg_range hb b, get_pos_range hb b in
+  Printf.printf "%.16e, %.16e\n" opp_neg_l neg_u;
+  let opp_neg_l, neg_u =
+    match na, nb with
+    | Some (al, au), Some (bl, bu) ->
+      let l, u = mod_range al au bl bu in
+      Printf.printf "%.16e, %.16e\n" l u;
+      assert(is_neg l);
+      assert(is_neg u);
+      max (-.l) opp_neg_l, max u neg_u
+    | _, _ -> opp_neg_l, neg_u in
+  Printf.printf "%.16e, %.16e\n" opp_neg_l neg_u;
+  let opp_neg_l, neg_u =
+    match na, pb with
+    | Some (al, au), Some (bl, bu) ->
+      let l, u = mod_range al au bl bu in
+      assert(is_neg l);
+      assert(is_neg u);
+      max (-.l) opp_neg_l, max u neg_u
+    | _, _ -> opp_neg_l, neg_u in
+  Printf.printf "%.16e, %.16e\n" opp_neg_l neg_u;
+  let opp_neg_l, neg_u =
+    match na with
+    | Some (l, u) when Header.has_infs hb ->
+      max (-.l) opp_neg_l, max neg_u u
+    | _ -> opp_neg_l, neg_u in
+  Printf.printf "%.16e, %.16e\n" opp_neg_l neg_u;
+  let opp_pos_l, pos_u =
+    match pa, nb with
+    | Some (al, au), Some (bl, bu) ->
+      let l, u = mod_range al au bl bu in
+      assert(is_pos l);
+      assert(is_pos u);
+      max (-.l) opp_pos_l, max u pos_u
+    | _, _ -> opp_pos_l, pos_u in
+  let opp_pos_l, pos_u =
+    match pa, pb with
+    | Some (al, au), Some (bl, bu) ->
+      let l, u = mod_range al au bl bu in
+      assert(is_pos l);
+      assert(is_pos u);
+      max (-.l) opp_pos_l, max u pos_u
+    | _, _ -> opp_pos_l, pos_u in
+  let opp_pos_l, pos_u =
+    match pa with
+    | Some (l, u) when Header.has_infs hb ->
+      max (-.l) opp_pos_l, max u pos_u
+    | _ -> opp_pos_l, pos_u in
+  let header, neg_l, neg_u, pos_l, pos_u =
+    normalize_for_mult header (-. opp_neg_l) neg_u (-. opp_pos_l) pos_u
+  in
+  inject header neg_l neg_u pos_l pos_u |> normalize
 
 module IntVal = struct
 
@@ -2798,7 +2978,7 @@ module IntVal = struct
       | Some bint -> Format.fprintf fmt "%s, " (Int.string_of_big_int bint));
       Format.fprintf fmt "%s, " (Int.string_of_big_int f);
       Format.fprintf fmt "%s)" (Int.string_of_big_int m)
-       
+
   let to_string t = Format.asprintf "%a" pp t
 
   let small_cardinal = ref 8
@@ -2933,5 +3113,4 @@ module IntVal = struct
     to_int_range signed_big_int_of_float
 
 end
-
 
