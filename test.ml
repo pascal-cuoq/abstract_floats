@@ -1000,10 +1000,17 @@ module TestFmod = struct
     let hb = Header.(set_flag bottom negative_normalish) in
     let b = Header.allocate_abstract_float hb in
     set_neg b (-1.5162948824415059e+01) (-1.5162948824415057e+01);
-    for i = 0 to 1000000 do
-      test a b
+    let ab = fmod a b in
+    Format.printf "%a@." pretty ab;
+    for i = 0 to 100000 do
+      let rfa, rfb = srf a, srf b in
+      let rfab = mod_float rfa rfb in
+      if not (float_in_abstract_float rfab ab) then begin
+        Format.printf "%a\n%a\n%a\n\n%.16e\n%.16e\n%.16e\n"
+        pretty a pretty b pretty ab rfa rfb rfab;
+        assert false
+      end
     done
-
 
 end
 
@@ -1052,5 +1059,4 @@ let () =
     TestReverseDiv2.(test_rand ())
 let () =
   if test_fmod then
-    TestFmod.(test1())
-
+    TestFmod.(test1 (); test_rand ())

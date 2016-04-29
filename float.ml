@@ -2864,6 +2864,28 @@ let reverse_div2 x a b =
 
    *)
 
+module Set_rounding_mode = struct
+
+  type c_rounding_mode =
+      FE_ToNearest | FE_Upward | FE_Downward | FE_TowardZero
+
+  let string_of_c_rounding_mode = function
+    | FE_ToNearest -> "FE_NEAREST"
+    | FE_Upward -> "FE_UPWARD"
+    | FE_Downward -> "FE_DOWNWARD"
+    | FE_TowardZero -> "FE_TOWARDZERO"
+
+  external set_round_downward: unit -> unit = "set_round_downward" "noalloc"
+  external set_round_upward: unit -> unit = "set_round_upward" "noalloc"
+  external set_round_nearest_even: unit -> unit = "set_round_nearest_even" "noalloc"
+  external set_round_toward_zero : unit -> unit = "set_round_toward_zero" "noalloc"
+  external get_rounding_mode: unit -> c_rounding_mode = "get_rounding_mode" "noalloc"
+  external set_rounding_mode: c_rounding_mode -> unit = "set_rounding_mode" "noalloc"
+
+end
+
+let inacci = 2. ** 52.
+
 let mod_range al au bl bu =
   let trunc x =
     if is_neg x then ceil x else floor x in
@@ -2872,18 +2894,20 @@ let mod_range al au bl bu =
       if bu > al then 0., fpred bu else
       if bu = al then begin
         if bl = al then 0., 0. else 0., bu
-      end else
+      end else begin
+        Set_rounding_mode.set_round_toward_zero ();
         let il, iu = trunc (al /. bu), trunc (au /. bl) in
+        Set_rounding_mode.set_round_nearest_even ();
         if (il = 0. && iu = 0.) || il <> iu ||
-            il = infinity || iu = infinity then 0., bu else
+           il = infinity || iu = infinity ||
+           il >= inacci || iu >= inacci then 0., bu else
           mod_float al bu, mod_float au bl
+      end
     end in
   let na, nb = is_neg al, is_neg bl in
   let al, au = if na then -.au, -.al else al, au in
   let bl, bu = if nb then -.bu, -.bl else bl, bu in
-  (* Printf.printf "%.16e, %.16e, %.16e %.16e\n" al au bl bu; *)
   let l, u = do_mod al au bl bu in
-  (* Printf.printf "%.16e, %.16e\n" l u; *)
   if na then -.u, -.l else l, u
 
 let fmod a b =
@@ -2895,17 +2919,14 @@ let fmod a b =
   let opp_pos_l, pos_u = neg_infinity, 0. in
   let na, pa = get_neg_range ha a, get_pos_range ha a in
   let nb, pb = get_neg_range hb b, get_pos_range hb b in
-  Printf.printf "%.16e, %.16e\n" opp_neg_l neg_u;
   let opp_neg_l, neg_u =
     match na, nb with
     | Some (al, au), Some (bl, bu) ->
       let l, u = mod_range al au bl bu in
-      Printf.printf "%.16e, %.16e\n" l u;
       assert(is_neg l);
       assert(is_neg u);
       max (-.l) opp_neg_l, max u neg_u
     | _, _ -> opp_neg_l, neg_u in
-  Printf.printf "%.16e, %.16e\n" opp_neg_l neg_u;
   let opp_neg_l, neg_u =
     match na, pb with
     | Some (al, au), Some (bl, bu) ->
@@ -2914,13 +2935,11 @@ let fmod a b =
       assert(is_neg u);
       max (-.l) opp_neg_l, max u neg_u
     | _, _ -> opp_neg_l, neg_u in
-  Printf.printf "%.16e, %.16e\n" opp_neg_l neg_u;
   let opp_neg_l, neg_u =
     match na with
     | Some (l, u) when Header.has_infs hb ->
       max (-.l) opp_neg_l, max neg_u u
     | _ -> opp_neg_l, neg_u in
-  Printf.printf "%.16e, %.16e\n" opp_neg_l neg_u;
   let opp_pos_l, pos_u =
     match pa, nb with
     | Some (al, au), Some (bl, bu) ->
