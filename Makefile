@@ -1,4 +1,4 @@
-all: build nor
+all: build
 
 build: rounding_stub.c float.ml test.ml dichotomy.ml dichotomy_test.ml
 	ocamlfind ocamlopt -package num -c -g -unsafe rounding_stub.c float.ml
