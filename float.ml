@@ -435,7 +435,7 @@ end = struct
 
   let has_zeros h = (h land zeros_mask) <> 0
 
-  let has_infs h = (h land positive_inf + negative_inf) <> 0
+  let has_infs h = (h land (positive_inf + negative_inf)) <> 0
 
   let size h =
     let posneg = h land normalish_mask in
@@ -548,8 +548,8 @@ end = struct
     let h = h lxor nn in (* clear negative_normalish and negative_inf if
                             present *)
     let add_NaN = -nn lsr (Sys.word_size - 1 - 2) in
-(* if nn is nonzero, add_NaN is 3.
-   if nn is zero, add_NaN is 0. *)
+  (* if nn is nonzero, add_NaN is 3.
+     if nn is zero, add_NaN is 0. *)
     h lor add_NaN
 
   let neg h =
@@ -689,8 +689,8 @@ end = struct
         h lor x_zeros else h in
     if (test h1 (positive_inf + negative_inf) &&
         test h2 (positive_zero + negative_zero)) ||
-       test h1 at_least_one_NaN || test h2 at_least_one_NaN ||
-       (h1 <> 0 && (h2 lor (positive_zero + negative_zero) <> 0)) then
+       test h1 at_least_one_NaN || test h2 at_least_one_NaN || has_infs h1 ||
+       (h1 <> 0 && (h2 land (positive_zero + negative_zero) <> 0)) then
       set_all_NaNs h else h
 
   let meet h1 h2 =
@@ -2890,24 +2890,28 @@ let mod_range al au bl bu =
   let trunc x =
     if is_neg x then ceil x else floor x in
   let do_mod al au bl bu =
+    Set_rounding_mode.set_round_toward_zero ();
+    let il, iu = trunc (al /. bu), trunc (au /. bl) in
+    Set_rounding_mode.set_round_nearest_even ();
+    Printf.printf "il: %.16e\niu: %.16e\n\n" il iu;
+    let ml, mu = mod_float al bu, mod_float au bl in
+    Printf.printf "ml: %.16e\nmu: %.16e\n\n" ml mu;
     if bl > au then al, au else begin
       if bu > al then 0., fpred bu else
       if bu = al then begin
         if bl = al then 0., 0. else 0., bu
       end else begin
-        Set_rounding_mode.set_round_toward_zero ();
-        let il, iu = trunc (al /. bu), trunc (au /. bl) in
-        Set_rounding_mode.set_round_nearest_even ();
-        if (il = 0. && iu = 0.) || il <> iu ||
-           il = infinity || iu = infinity ||
-           il >= inacci || iu >= inacci then 0., bu else
-          mod_float al bu, mod_float au bl
+        if il = iu && il <> 0. && il <> infinity && il <> max_float &&
+           ((il < inacci && iu < inacci) || al = au) then
+           mod_float al bu, mod_float au bl else
+           0., bu
       end
     end in
   let na, nb = is_neg al, is_neg bl in
   let al, au = if na then -.au, -.al else al, au in
   let bl, bu = if nb then -.bu, -.bl else bl, bu in
-  let l, u = do_mod al au bl bu in
+  let l, u =
+    do_mod al au bl bu in
   if na then -.u, -.l else l, u
 
 let fmod a b =
@@ -3132,4 +3136,3 @@ module IntVal = struct
     to_int_range signed_big_int_of_float
 
 end
-

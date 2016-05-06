@@ -995,13 +995,8 @@ module TestFmod = struct
      -1.0522307013944967e+01
   *)
 
-  let test1 () =
-    let a = inject_float (-2.7783965750357370e+307) in
-    let hb = Header.(set_flag bottom negative_normalish) in
-    let b = Header.allocate_abstract_float hb in
-    set_neg b (-1.5162948824415059e+01) (-1.5162948824415057e+01);
-    let ab = fmod a b in
-    Format.printf "%a@." pretty ab;
+  let loop_test a b ab =
+    Format.printf "%a\n%a\n%a\n@." pretty a pretty b pretty ab;
     for i = 0 to 100000 do
       let rfa, rfb = srf a, srf b in
       let rfab = mod_float rfa rfb in
@@ -1011,6 +1006,30 @@ module TestFmod = struct
         assert false
       end
     done
+
+  let test1 () =
+    let a = inject_float (-2.7783965750357370e+307) in
+    let hb = Header.(set_flag bottom negative_normalish) in
+    let b = Header.allocate_abstract_float hb in
+    set_neg b (-1.5162948824415059e+01) (-1.5162948824415057e+01);
+    let ab = fmod a b in
+    loop_test a b ab
+
+  let test2 () =
+    let a = inject_float 2.5063236201696913e+04 in
+    let hb = Header.(set_flag bottom negative_normalish) in
+    let b = Header.allocate_abstract_float hb in
+    set_neg b (-3.4423463629405865e-311) (-2.2604527979277921e-311);
+    let ab = fmod a b in
+    loop_test a b ab
+    
+  let test3 () =
+    let a = inject_float (-1.1494484902313178e+308) in
+    let hb = Header.(of_flags [positive_normalish; positive_zero; negative_zero]) in
+    let b = Header.allocate_abstract_float hb in
+    set_pos b 1.5721173633720158e+01 1.5721173633720159e+01;
+    let ab = fmod a b in
+    loop_test a b ab
 
 end
 
@@ -1059,4 +1078,4 @@ let () =
     TestReverseDiv2.(test_rand ())
 let () =
   if test_fmod then
-    TestFmod.(test1 (); test_rand ())
+    TestFmod.(test3 ())
