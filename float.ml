@@ -2912,7 +2912,8 @@ let mod_range al au bl bu =
   let bl, bu = if nb then -.bu, -.bl else bl, bu in
   let l, u =
     do_mod al au bl bu in
-  if na then -.u, -.l else l, u
+  let l, u = if na then -.u, -.l else l, u in
+  if l > u then (if na then (-. bu), (-0.) else 0., bu) else l, u
 
 let fmod a b =
   let a = if is_singleton a then expand a else a in
