@@ -355,33 +355,6 @@ let range_div_2 al au bl bu =
 
 let () = Random.self_init ()
 
-let test () =
-  let random_pos_normalish () = Random.float 10. in
-(*
-    match Random.int 15 with
-    | 0 -> min_float
-    | 1 -> max_float
-    | 2 -> Random.float min_float
-    | 3 | 4 -> Random.float max_float
-    | 5 -> Random.float 2e-308
-    | 6 -> 2e-308
-    | _ -> Random.float 1_000_00. in
-*)
-  let au = random_pos_normalish () in
-  let al = if Random.int 5 = 0 then au else Random.float au in
-  if al = 0. then failwith ".";
-  let bu = random_pos_normalish () in
-  let bl = if Random.int 5 = 0 then bu else Random.float bu in
-  if bl = 0. then failwith ".";
-  let m, n, _ = range_div_2 al au bl bu in
-  if m > 10 || n > 10 then begin
-    Printf.printf "%d, %d\n" m n;
-    Printf.printf "%.16e\n" al;
-    Printf.printf "%.16e\n" au;
-    Printf.printf "%.16e\n" bl;
-    Printf.printf "%.16e\n" bu;
-    assert false
-  end
 
 let div2_cp = 4.4408920985006257e-16
 (* least value that can be divided and overflow to infinity *)
@@ -452,3 +425,78 @@ let range_div_m2 al au bl bu =
       else
         lower_pos_div_m2 al bl, upper_pos_div_m2 au bu in
     if xl > xu then None else Some (xl, xu)
+
+(* The drifting problem.
+
+   Consider the following cases:
+     X = {5.4000000000000015e-01}
+     A = {2.9999999999999999e-01 ... 5.9999999999999998e-01} (rounded from {0.3, 0.6})
+     B = {1.8}
+      
+     What the value of X could be if the following if-expr takes true branch?
+
+              if (X / A = B) {...} else {...}
+    
+    Actually, this if-expr can **never** take true branch, since there
+    is no value ``a`` in A that can make ``5.4000000000000015e-01 / a == 1.8``.
+
+    From A and B, X should be narrowed by positive range
+      {5.4000000000000037e-01, 1.0799999999999998e+00}
+
+    however, due to the current imperfect algorithm, X is
+    narrowed by positive range:
+      {5.4000000000000004e-01, 1.0799999999999998e+00}
+
+    This range is not accurate, we need to drift (shift bits) to find the
+    best solution. The question is: what's the worse case scenario?
+    What's the maximum of the possible number of shifts we need to do?
+   
+    A guess is 2^53. This makes implementation of perfect solution impossible.
+    
+    Can we do better?
+      -- Not sure. This is still an open problem!
+
+   The following piece of program is a test that generate all the examples
+   where tremendous amount of drifting is needed to find the perfect
+   narrowing range.
+
+*)
+
+module DriftTest = struct
+
+  let thershold = 100_000
+
+  let test () =
+    let random_pos_normalish () = Random.float 10. in
+    let au = random_pos_normalish () in
+    let al = if Random.int 5 = 0 then au else Random.float au in
+    if al = 0. then failwith ".";
+    let bu = random_pos_normalish () in
+    let bl = if Random.int 5 = 0 then bu else Random.float bu in
+    if bl = 0. then failwith ".";
+    let m, n, sol = range_div_2 al au bl bu in
+    if m > thershold || n > thershold then begin
+      Printf.printf "===================================\n";
+      Printf.printf "  al = %.16e\n" al;
+      Printf.printf "  au = %.16e\n" au;
+      Printf.printf "  bl = %.16e\n" bl;
+      Printf.printf "  bu = %.16e\n" bu;
+      Printf.printf "  m = %d, n = %d\n" m n;
+      Printf.printf "  DRIFT : %d\n" (max m n);
+      begin
+        match sol with
+        | None -> Printf.printf "  No solution for narrowing range for X\n"
+        | Some (xl, xu) ->
+          Printf.printf "  Narrowing range: {%.16e, %.16e}\n" xl xu
+      end;
+      flush stdout
+    end
+
+  let drift_test () =
+    for i = 0 to 100_000_000 do
+      test ()
+    done
+
+end
+
+let () = DriftTest.drift_test ()

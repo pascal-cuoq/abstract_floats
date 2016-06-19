@@ -8,6 +8,9 @@ build: rounding_stub.c float.ml test.ml dichotomy.ml dichotomy_test.ml
 	ocamlfind ocamlopt -c -g -unsafe dichotomy_test.ml
 	ocamlfind ocamlopt -linkpkg -g -unsafe -package num dichotomy.cmx dichotomy_test.cmx -o test_dich.out
 
+drift: d2.ml
+	ocamlopt d2.ml -inline 100 -o drift
+
 clean:
 	rm -rf coverage _build
 	rm -f *.cmo *.cmi *.cmx *.cmp *.out *.html *.o *.so *.a *.cma

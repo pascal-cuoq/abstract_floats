@@ -2875,12 +2875,12 @@ module Set_rounding_mode = struct
     | FE_Downward -> "FE_DOWNWARD"
     | FE_TowardZero -> "FE_TOWARDZERO"
 
-  external set_round_downward: unit -> unit = "set_round_downward" "noalloc"
-  external set_round_upward: unit -> unit = "set_round_upward" "noalloc"
-  external set_round_nearest_even: unit -> unit = "set_round_nearest_even" "noalloc"
-  external set_round_toward_zero : unit -> unit = "set_round_toward_zero" "noalloc"
-  external get_rounding_mode: unit -> c_rounding_mode = "get_rounding_mode" "noalloc"
-  external set_rounding_mode: c_rounding_mode -> unit = "set_rounding_mode" "noalloc"
+  external set_round_downward: unit -> unit = "set_round_downward" [@@noalloc]
+  external set_round_upward: unit -> unit = "set_round_upward" [@@noalloc]
+  external set_round_nearest_even: unit -> unit = "set_round_nearest_even" [@@noalloc]
+  external set_round_toward_zero : unit -> unit = "set_round_toward_zero" [@@noalloc]
+  external get_rounding_mode: unit -> c_rounding_mode = "get_rounding_mode" [@@noalloc]
+  external set_rounding_mode: c_rounding_mode -> unit = "set_rounding_mode" [@@noalloc]
 
 end
 
