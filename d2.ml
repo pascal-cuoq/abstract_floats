@@ -495,8 +495,8 @@ module DriftTest = struct
           fprintf fmt "      %s\\%s  /@." p1 p2;
           fprintf fmt "      %s \\%s/@." p1 p2;
           fprintf fmt "    {%.16e, %.16e}@." nxl nxu;
-          fprintf fmt "    Narrowed xl  = %.16e / %.16e@." nal nbl;
-          fprintf fmt "    Narrowed xu  = %.16e / %.16e@." nau nbu
+          fprintf fmt "    Narrowed xl  / %.16e = %.16e@." nal nbl;
+          fprintf fmt "    Narrowed xu  / %.16e = %.16e@." nau nbu
       end
     end
 
