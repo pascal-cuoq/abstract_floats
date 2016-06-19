@@ -283,7 +283,7 @@ let rec drift_right xl al au bl bu i =
   if al > au then raise Not_found;
   let b = xl /. al in
   let err = if is_pos bl then b -. bl else bl -. b in
-  if err = 0. then i, xl else begin
+  if err = 0. then i, xl, al, bl else begin
     if is_pos err && is_pos al || is_neg err && is_neg al then
       drift_right xl (fsucc' al) au bl bu (i + 1)
     else
@@ -294,7 +294,7 @@ let rec drift_left xu al au bl bu i =
   if al > au then raise Not_found;
   let b = xu /. au in
   let err = if is_pos bl then b -. bu else bu -. b in
-  if err = 0. then i, xu else begin
+  if err = 0. then i, xu, au, bu else begin
     if is_pos err && is_neg al || is_neg err && is_pos al then
       drift_left xu al (fpred' au) bl bu (i + 1)
     else
@@ -338,20 +338,21 @@ let range_div al au bl bu =
     if xl > xu then None else Some (xl, xu)
 
 let range_div_2 al au bl bu =
-    let xl, xu =
-      if is_pos au && is_pos bu then
-        lower_pos_div al bl, upper_pos_div au bu else
-      if is_pos au && is_neg bu then
-        lower_neg_div al bl, upper_neg_div au bu else
-      if is_neg au && is_pos bu then
-        lower_neg_div_2 al bl, upper_neg_div_2 au bu
-      else
-        lower_pos_div_2 al bl, upper_pos_div_2 au bu in
-    try
-      let n1, nxl = drift_right xl al au bl bu 0 in
-      let n2, nxu = drift_left xu al au bl bu 0 in
-      if nxl > nxu then n1, n2, None else n1, n2, Some (xl, xu, nxl, nxu)
-    with _ -> 0, 0, None
+  let xl, xu =
+    if is_pos au && is_pos bu then
+      lower_pos_div al bl, upper_pos_div au bu else
+    if is_pos au && is_neg bu then
+      lower_neg_div al bl, upper_neg_div au bu else
+    if is_neg au && is_pos bu then
+      lower_neg_div_2 al bl, upper_neg_div_2 au bu
+    else
+      lower_pos_div_2 al bl, upper_pos_div_2 au bu in
+  try
+    let n1, nxl, nal, nbl = drift_right xl al au bl bu 0 in
+    let n2, nxu, nau, nbu = drift_left xu al au bl bu 0 in
+    if nxl > nxu then n1, n2, None else
+      n1, n2, Some (xl, xu, nxl, nxu, nal, nbl, nau, nbu)
+  with _ -> 0, 0, None
 
 let () = Random.self_init ()
 
@@ -473,23 +474,18 @@ module DriftTest = struct
   let test upper_x fmt =
     let random_pos_normalish () = Random.float upper_x in
     let au = random_pos_normalish () in
-    let al = if Random.int 5 = 0 then au else Random.float au in
-    if al = 0. then failwith ".";
-    let bu = random_pos_normalish () in
-    let bl = if Random.int 5 = 0 then bu else Random.float bu in
-    if bl = 0. then failwith ".";
-    let m, n, sol = range_div_2 al au bl bu in
+    let al = Random.float au in
+    let b = random_pos_normalish () in
+    let m, n, sol = range_div_2 al au b b in
     if m > thershold || n > thershold then begin
       fprintf fmt "===================================\n";
-      fprintf fmt "  al = %a@." ppf al;
-      fprintf fmt "  au = %a@." ppf au;
-      fprintf fmt "  bl = %a@." ppf bl;
-      fprintf fmt "  bu = %a@." ppf bu;
+      fprintf fmt "  A = {%a, %a}@." ppf al ppf au;
+      fprintf fmt "  B = {%a}@." ppf b;
       fprintf fmt "  m = %d, n = %d@." m n;
       begin
         match sol with
         | None -> fprintf fmt "  No solution for narrowing range for X@."
-        | Some (xl, xu, nxl, nxu) ->
+        | Some (xl, xu, nxl, nxu, nal, nbl, nau, nbu) ->
           let p1, p2 = String.make 10 ' ', String.make 20 ' ' in
           fprintf fmt "  Narrowing range:@.";
           fprintf fmt "    Lower bound shifts to right %d times@." m;
@@ -498,7 +494,9 @@ module DriftTest = struct
           fprintf fmt "    {%.16e, %.16e}@." xl xu;
           fprintf fmt "      %s\\%s  /@." p1 p2;
           fprintf fmt "      %s \\%s/@." p1 p2;
-          fprintf fmt "    {%.16e, %.16e}@." nxl nxu
+          fprintf fmt "    {%.16e, %.16e}@." nxl nxu;
+          fprintf fmt "    Narrowed xl  = %.16e / %.16e@." nal nbl;
+          fprintf fmt "    Narrowed xu  = %.16e / %.16e@." nau nbu
       end
     end
 
