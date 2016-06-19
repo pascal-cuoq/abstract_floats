@@ -464,9 +464,13 @@ let range_div_m2 al au bl bu =
 
 module DriftTest = struct
 
+  open Format
+
   let thershold = 100_000
 
-  let test upper_x fn () =
+  let ppf fmt f = fprintf fmt "%.16e" f
+
+  let test upper_x fmt =
     let random_pos_normalish () = Random.float upper_x in
     let au = random_pos_normalish () in
     let al = if Random.int 5 = 0 then au else Random.float au in
@@ -476,21 +480,26 @@ module DriftTest = struct
     if bl = 0. then failwith ".";
     let m, n, sol = range_div_2 al au bl bu in
     if m > thershold || n > thershold then begin
-      Printf.fprintf fn "===================================\n";
-      Printf.fprintf fn "  al = %.16e\n" al;
-      Printf.fprintf fn "  au = %.16e\n" au;
-      Printf.fprintf fn "  bl = %.16e\n" bl;
-      Printf.fprintf fn "  bu = %.16e\n" bu;
-      Printf.fprintf fn "  m = %d, n = %d\n" m n;
-      Printf.fprintf fn "  DRIFT : %d\n" (m + n);
+      fprintf fmt "===================================\n";
+      fprintf fmt "  al = %a@." ppf al;
+      fprintf fmt "  au = %a@." ppf au;
+      fprintf fmt "  bl = %a@." ppf bl;
+      fprintf fmt "  bu = %a@." ppf bu;
+      fprintf fmt "  m = %d, n = %d@." m n;
       begin
         match sol with
-        | None -> Printf.fprintf fn "  No solution for narrowing range for X\n"
+        | None -> fprintf fmt "  No solution for narrowing range for X@."
         | Some (xl, xu, nxl, nxu) ->
-          Printf.fprintf fn "  Narrowing range from: {%.16e, %.16e}\n" xl xu;
-          Printf.fprintf fn "                  to  : {%.16e, %.16e}\n" nxl nxu
-      end;
-      flush fn
+          let p1, p2 = String.make 10 ' ', String.make 20 ' ' in
+          fprintf fmt "  Narrowing range:@.";
+          fprintf fmt "    Lower bound shifts to right %d times@." m;
+          fprintf fmt "    Upper bound shifts to left  %d times@." n;
+          fprintf fmt "    Total shifting operations : %d times@." (m + n);
+          fprintf fmt "    {%.16e, %.16e}@." xl xu;
+          fprintf fmt "      %s\\%s  /@." p1 p2;
+          fprintf fmt "      %s \\%s/@." p1 p2;
+          fprintf fmt "    {%.16e, %.16e}@." nxl nxu
+      end
     end
 
   let log_basename = "drift_x_upper_"
@@ -504,13 +513,14 @@ module DriftTest = struct
 
   let run_test x =
     let f = open_out (fn_from_x x) in
-    for i = 0 to 100_000_000 do
-      test x f ()
+    for i = 0 to 100_000_00 do
+      test x (formatter_of_out_channel f)
     done;
     close_out f
 
+  (* test upper bound of abstract float 0.01, 0.1, 1. *)
   let drift_test () =
-    List.iter run_test [0.01; 0.1; 1.; 10.]
+    List.iter run_test [0.01; 0.1; 1.]
 
 end
 
