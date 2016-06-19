@@ -466,7 +466,7 @@ module DriftTest = struct
 
   let thershold = 100_000
 
-  let test upper_x () =
+  let test upper_x fn () =
     let random_pos_normalish () = Random.float upper_x in
     let au = random_pos_normalish () in
     let al = if Random.int 5 = 0 then au else Random.float au in
@@ -476,28 +476,41 @@ module DriftTest = struct
     if bl = 0. then failwith ".";
     let m, n, sol = range_div_2 al au bl bu in
     if m > thershold || n > thershold then begin
-      Printf.printf "===================================\n";
-      Printf.printf "  al = %.16e\n" al;
-      Printf.printf "  au = %.16e\n" au;
-      Printf.printf "  bl = %.16e\n" bl;
-      Printf.printf "  bu = %.16e\n" bu;
-      Printf.printf "  m = %d, n = %d\n" m n;
-      Printf.printf "  DRIFT : %d\n" (max m n);
+      Printf.fprintf fn "===================================\n";
+      Printf.fprintf fn "  al = %.16e\n" al;
+      Printf.fprintf fn "  au = %.16e\n" au;
+      Printf.fprintf fn "  bl = %.16e\n" bl;
+      Printf.fprintf fn "  bu = %.16e\n" bu;
+      Printf.fprintf fn "  m = %d, n = %d\n" m n;
+      Printf.fprintf fn "  DRIFT : %d\n" (m + n);
       begin
         match sol with
-        | None -> Printf.printf "  No solution for narrowing range for X\n"
+        | None -> Printf.fprintf fn "  No solution for narrowing range for X\n"
         | Some (xl, xu, nxl, nxu) ->
-          Printf.printf "  Narrowing range from: {%.16e, %.16e}\n" xl xu;
-          Printf.printf "                  to  : {%.16e, %.16e}\n" nxl nxu
+          Printf.fprintf fn "  Narrowing range from: {%.16e, %.16e}\n" xl xu;
+          Printf.fprintf fn "                  to  : {%.16e, %.16e}\n" nxl nxu
       end;
-      flush stdout
+      flush fn
     end
 
-  let drift_test () =
-    let test = test 1. in
+  let log_basename = "drift_x_upper_"
+
+  let fn_from_x x =
+    let sx = string_of_float x in
+    let i = String.index_from sx 0 '.' in
+    let sx = (String.sub sx 0 i) ^ "dot" ^
+             (String.sub sx (i + 1) (String.length sx - i - 1)) in
+    Printf.sprintf "%s%s.log" log_basename sx
+
+  let run_test x =
+    let f = open_out (fn_from_x x) in
     for i = 0 to 100_000_000 do
-      test ()
-    done
+      test x f ()
+    done;
+    close_out f
+
+  let drift_test () =
+    List.iter run_test [0.01; 0.1; 1.; 10.]
 
 end
 
