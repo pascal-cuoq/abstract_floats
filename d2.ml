@@ -348,9 +348,9 @@ let range_div_2 al au bl bu =
       else
         lower_pos_div_2 al bl, upper_pos_div_2 au bu in
     try
-      let n1, xl = drift_right xl al au bl bu 0 in
-      let n2, xu = drift_left xu al au bl bu 0 in
-      if xl > xu then n1, n2, None else n1, n2, Some (xl, xu)
+      let n1, nxl = drift_right xl al au bl bu 0 in
+      let n2, nxu = drift_left xu al au bl bu 0 in
+      if nxl > nxu then n1, n2, None else n1, n2, Some (xl, xu, nxl, nxu)
     with _ -> 0, 0, None
 
 let () = Random.self_init ()
@@ -466,8 +466,8 @@ module DriftTest = struct
 
   let thershold = 100_000
 
-  let test () =
-    let random_pos_normalish () = Random.float 10. in
+  let test upper_x () =
+    let random_pos_normalish () = Random.float upper_x in
     let au = random_pos_normalish () in
     let al = if Random.int 5 = 0 then au else Random.float au in
     if al = 0. then failwith ".";
@@ -486,13 +486,15 @@ module DriftTest = struct
       begin
         match sol with
         | None -> Printf.printf "  No solution for narrowing range for X\n"
-        | Some (xl, xu) ->
-          Printf.printf "  Narrowing range: {%.16e, %.16e}\n" xl xu
+        | Some (xl, xu, nxl, nxu) ->
+          Printf.printf "  Narrowing range from: {%.16e, %.16e}\n" xl xu;
+          Printf.printf "                  to  : {%.16e, %.16e}\n" nxl nxu
       end;
       flush stdout
     end
 
   let drift_test () =
+    let test = test 1. in
     for i = 0 to 100_000_000 do
       test ()
     done
